@@ -1,0 +1,39 @@
+# ─── 环境配置与凭证（包含真实密钥，切勿提交） ───
+.env
+.env.local
+.env.production
+config.local.yaml
+
+# ─── 测试文件（含设备调试信息） ───
+iottest.py
+smart-home.conf
+# ─── Python 字节码与虚拟环境 ───
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# ─── IDE 与系统文件 ───
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── 日志与运行时文件 ───
+*.log
+*.db
+*.sqlite3
+
+# ─── 大体积模型文件（自行下载） ───
+*.onnx
+
+# ─── 操作系统生成的文件 ───
+dist/
+build/
+*.egg-info/
