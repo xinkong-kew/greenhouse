@@ -1,0 +1,23 @@
+# 环境变量（生产环境）
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 日志文件
+*.log
+
+# 串口命令缓存
+serial_cmd.json
+
+# 虚拟环境
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

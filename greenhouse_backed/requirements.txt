@@ -1,0 +1,8 @@
+Flask==2.3.2
+Flask-SocketIO==5.3.4
+python-socketio==5.11.2
+eventlet>=0.35
+mysql-connector-python==8.0.33
+pyserial==3.5
+requests==2.31.0
+gunicorn==21.2.0
