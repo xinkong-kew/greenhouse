@@ -1388,20 +1388,46 @@ def api_device_commands():
     """获取当前控制命令状态（开发板轮询用）
     
     开发板通过 GET 请求获取最新的设备状态和阈值指令，
-    返回 JSON 格式，包含所有控制命令的当前值。
+    从数据库读取最新记录，返回 JSON 格式。
     """
-    # 构建状态字典
+    db_status = {'pump_status': False, 'fan_status': False,
+                 'motor_status': False, 'buzzer_status': False,
+                 'flame_detected': False}
+
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT pump_status, fan_status, motor_status, buzzer_status, flame_detected
+                FROM sensor_data
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            if row:
+                db_status = {
+                    'pump_status': bool(row[0]),
+                    'fan_status': bool(row[1]),
+                    'motor_status': bool(row[2]),
+                    'buzzer_status': bool(row[3]),
+                    'flame_detected': bool(row[4]),
+                }
+            cursor.close()
+            conn.close()
+        except mysql.connector.Error:
+            cursor.close()
+            conn.close()
+
     commands = {
-        # 设备状态
         'device': {
-            'pump': device_status_cache.get('pump_status', False),
-            'fan': device_status_cache.get('fan_status', False),
-            'motor': device_status_cache.get('motor_status', False),
-            'buzzer': device_status_cache.get('buzzer_status', False),
+            'pump': db_status['pump_status'],
+            'fan': db_status['fan_status'],
+            'motor': db_status['motor_status'],
+            'buzzer': db_status['buzzer_status'],
             'flame': device_status_cache.get('flame_status', True),
             'human': device_status_cache.get('human_status', True),
         },
-        # 阈值设置
         'threshold': {
             'temp': threshold_cache.get('temp'),
             'hum': threshold_cache.get('hum'),
