@@ -1230,11 +1230,17 @@ ADP610_FIELD_MAP = {
     'buzzer_status': 'buzzer_status', 'buzzer': 'buzzer_status',
 }
 
-@app.route('/api/adp610/data', methods=['POST'])
+@app.route('/api/adp610/data', methods=['GET', 'POST'])
 def api_adp610_data():
-    """接收 ADP-L610 Arduino 发送的传感器数据
+    """ADP-L610 Arduino 数据接口
 
-    支持 JSON 格式 POST，字段名灵活映射（如 temperature/temp、humidity/hum 等）。
+    POST: 接收传感器数据，字段名灵活映射
+    GET:  返回当前设备控制命令（供开发板轮询）
+    """
+    if request.method == 'GET':
+        return api_device_commands()
+
+    """支持 JSON 格式 POST，字段名灵活映射（如 temperature/temp、humidity/hum 等）。
     示例请求:
         POST /api/adp610/data
         Content-Type: application/json
