@@ -8,7 +8,7 @@
           <button class="btn" @click="predictTomorrow" :disabled="predictLoading">
             🔮 {{ predictResult ? '收起预测' : '预测明天天气' }}
           </button>
-          <button class="btn btn-sm btn-city" @click="showCityMap = true" title="切换城市">🗺️ {{ currentCity }}</button>
+          <button class="btn btn-sm btn-city" @click="showCityMap = true" title="切换城市">🗺️ {{ sharedCity.name }}</button>
           <span class="predict-date" v-if="predictResult">{{ predictResult.tomorrow.date }}</span>
           <span class="predict-hint" v-if="!predictResult && !predictLoading">点击按钮，智能分析明天天气并给出设备控制建议</span>
         </div>
@@ -16,7 +16,7 @@
         <!-- 城市选择地图（可视化中国地图） -->
         <ChinaMapV2
           v-if="showCityMap"
-          :currentCity="currentCity"
+          :currentCity="sharedCity.name"
           @close="showCityMap = false"
           @select="onCitySelect"
         />
@@ -131,6 +131,14 @@
           </div>
         </div>
       </div>
+      <!-- 一键自动按钮 -->
+      <div class="all-auto-row">
+        <button class="btn btn-all-auto" @click="setAllAuto" :disabled="allAutoLoading">
+          <span class="all-auto-icon">🤖</span>
+          <span>{{ allAutoLoading ? '正在设置...' : '一键自动' }}</span>
+        </button>
+        <span class="all-auto-hint">将全部设备切换为自动控制模式</span>
+      </div>
     </div>
 
     <!-- 阈值设置 -->
@@ -178,6 +186,7 @@
 import { reactive, ref, onMounted, onUnmounted } from 'vue'
 import socket from '../utils/socket.js'
 import ChinaMapV2 from '../components/ChinaMapV2.vue'
+import { sharedCity, updateCity } from '../stores/sharedCity.js'
 
 const deviceList = [
   { key: 'pump', label: '水泵', icon: '🚰' },
@@ -195,6 +204,8 @@ const deviceStatus = reactive({
   human: true    // 默认自动
 })
 
+const allAutoLoading = ref(false)
+
 const thresholdList = [
   { key: 'temp', label: '温度', icon: '🌡️', unit: '°C', min: 0, max: 60, step: 0.5, default: 25 },
   { key: 'humidity', label: '湿度', icon: '💧', unit: '%', min: 0, max: 100, step: 1, default: 60 },
@@ -210,11 +221,10 @@ const predictLoading = ref(false)
 const predictResult = ref(null)
 const predictError = ref('')
 const showCityMap = ref(false)
-const currentCity = ref('郑州')
 
 async function onCitySelect({ province, city, cityEn }) {
   showCityMap.value = false
-  currentCity.value = city
+  updateCity(city, cityEn)
   try {
     await fetch('/api/weather/set_city', {
       method: 'POST',
@@ -362,6 +372,34 @@ function setDeviceAuto(device) {
     .catch(() => {
       addCmdLog('device', `${labelMap[device] || device} → 启动自动工作模式`)
     })
+}
+
+function setAllAuto() {
+  allAutoLoading.value = true
+  addCmdLog('device', '🤖 一键自动：设置全部设备为自动模式')
+
+  const promises = deviceList.map(device => {
+    const action = (device.key === 'flame' || device.key === 'human') ? 'auto' : 'auto'
+    return fetch('/api/device/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device: device.key, action: 'auto' })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          deviceStatus[device.key] = true
+        }
+      })
+      .catch(() => {
+        deviceStatus[device.key] = true
+      })
+  })
+
+  Promise.all(promises).then(() => {
+    allAutoLoading.value = false
+    addCmdLog('device', '✅ 全部设备已切换为自动模式')
+  })
 }
 
 function onThresholdInput(key, event) {
@@ -933,6 +971,49 @@ onUnmounted(() => {
 .btn-auto:hover {
   background: rgba(0, 212, 255, 0.2);
   border-color: rgba(0, 212, 255, 0.35);
+}
+
+.all-auto-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+}
+.btn-all-auto {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+.btn-all-auto:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+}
+.btn-all-auto:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-all-auto .all-auto-icon {
+  font-size: 20px;
+}
+.all-auto-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
 }
 .btn-query {
   font-size: 11px;

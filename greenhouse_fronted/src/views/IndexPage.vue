@@ -107,7 +107,7 @@
       <div class="glow-card weather-card">
         <div class="glow-card-title">
           🌤️ 天气预报
-          <span class="weather-city">{{ weather.city || '加载中...' }}</span>
+          <span class="weather-city">{{ sharedCity.name || '加载中...' }}</span>
           <button class="btn btn-sm btn-city" @click="showCityMap = true" title="切换城市">🗺️</button>
           <button class="btn btn-sm" @click="refreshWeather" style="margin-left:auto">🔄</button>
         </div>
@@ -115,7 +115,7 @@
         <!-- 城市选择地图（可视化中国地图） -->
         <ChinaMapV2
           v-if="showCityMap"
-          :currentCity="weather.city"
+          :currentCity="sharedCity.name"
           @close="showCityMap = false"
           @select="onCitySelect"
         />
@@ -279,6 +279,7 @@ import { reactive, ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import socket from '../utils/socket.js'
 import Chart from 'chart.js/auto'
 import ChinaMapV2 from '../components/ChinaMapV2.vue'
+import { sharedCity, updateCity } from '../stores/sharedCity.js'
 
 // ===== 传感器 =====
 const sensors = reactive({
@@ -308,6 +309,7 @@ const showCityMap = ref(false)
 
 async function onCitySelect({ province, city, cityEn }) {
   showCityMap.value = false
+  updateCity(city, cityEn)
   // 清除旧天气数据，显示加载状态
   weather.city = city
   weather.temp = '--'
@@ -336,6 +338,7 @@ async function onCitySelect({ province, city, cityEn }) {
 function applyWeatherData(forecast, cityName) {
   if (!forecast) return
   weather.city = cityName
+  updateCity(cityName, forecast.city_en || '')
   const fc = forecast.forecast || []
   if (fc.length > 0) {
     const cur = fc[0]
@@ -684,6 +687,7 @@ function handleWeatherUpdate(data) {
   // 如果用户手动选择了城市，保留中文名
   if (!weather.city || weather.city === '加载中...' || weather.city === '未知') {
     weather.city = fc.city || '未知'
+    updateCity(weather.city, fc.city_en || '')
   }
   const forecastListRaw = fc.forecast || []
   if (forecastListRaw.length > 0) {
@@ -752,6 +756,7 @@ onMounted(async () => {
     const data = await res.json()
     if (data.success && data.city) {
       weather.city = data.city
+      updateCity(data.city, data.city_en || '')
     }
   } catch {
     // 静默
