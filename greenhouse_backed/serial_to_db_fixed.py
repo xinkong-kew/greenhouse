@@ -46,10 +46,11 @@ DB_CONFIG = {
 # 串口配置（Linux 下自动检测，也可通过环境变量 SERIAL_PORT 指定）
 SERIAL_PORT_OVERRIDE = os.getenv('SERIAL_PORT', None)  # 例如: /dev/ttyUSB0 或 COM3
 
-# 串口数据正则
+# 串口数据正则（支持带 [#] 前缀或不带，含水位字段）
 SERIAL_PATTERN = re.compile(
     r'土壤=(\d+)\s+CO2=(\d+)\s+人体=(\d)\s+火焰=(\d)\s+'
-    r'距离=(-?[\d.]+)cm\s+温度=([\d.]+)℃\s+湿度=([\d.]+)%'
+    r'水位=([\d.]+)%\s+距离=(-?[\d.]+)cm\s+'
+    r'温度=([\d.]+)℃\s+湿度=([\d.]+)%'
 )
 
 
@@ -172,16 +173,31 @@ def send_cmd(ser):
             # 解析指令，更新内存设备状态
             # 格式: fan_on → fan=True, fan_off → fan=False
             # 报警指令: FLAME_AUTO → flame=True, FLAME_OFF → flame=False
+            # 水泵: 1 → pump=True, 0 → pump=False, auto → pump=True
             parts = cmd.split()
-            cmd_name = parts[0]  # 例如: fan_on, SET_temp, FLAME_AUTO
-            if '_' in cmd_name and not cmd_name.startswith('SET'):
+            cmd_name = parts[0]  # 例如: fan_on, SET_temp, FLAME_AUTO, 1, auto
+            
+            # 处理水泵特殊指令（1/0/auto）
+            if cmd_name == '1':
+                DEVICE_STATES['pump'] = True
+                print(f"   → 设备状态更新: pump = True")
+            elif cmd_name == '0':
+                DEVICE_STATES['pump'] = False
+                print(f"   → 设备状态更新: pump = False")
+            elif cmd_name.lower() == 'auto':
+                DEVICE_STATES['pump'] = True
+                print(f"   → 设备状态更新: pump = True (auto)")
+            elif '_' in cmd_name and not cmd_name.startswith('SET'):
                 dev_name, dev_action = cmd_name.split('_', 1)
                 dev_name_lower = dev_name.lower()
+                # 映射 servo → motor
+                if dev_name_lower == 'servo':
+                    dev_name_lower = 'motor'
                 if dev_name_lower in DEVICE_STATES:
                     if dev_action.lower() == 'off':
                         DEVICE_STATES[dev_name_lower] = False
-                    elif dev_action.lower() in ('on', 'auto'):
-                        DEVICE_STATES[dev_name_lower] = True
+                    elif dev_action.lower() in ('on', 'auto', 'manual'):
+                        DEVICE_STATES[dev_name_lower] = (dev_action.lower() != 'manual')
                     print(f"   → 设备状态更新: {dev_name_lower} = {DEVICE_STATES[dev_name_lower]}")
             
             # 清空命令
@@ -230,11 +246,11 @@ def main():
                 continue
             
             # 跳过非传感器行
-            if not line.startswith('土壤='):
+            if '土壤=' not in line:
                 continue
             
             # 正则解析
-            m = SERIAL_PATTERN.match(line)
+            m = SERIAL_PATTERN.search(line)
             if not m:
                 continue
             
@@ -243,9 +259,10 @@ def main():
             co2_raw = int(m.group(2))
             human_level = int(m.group(3))
             flame_level = int(m.group(4))
-            distance = float(m.group(5))
-            temperature = float(m.group(6))
-            humidity = float(m.group(7))
+            water_percent = float(m.group(5))
+            distance = float(m.group(6))
+            temperature = float(m.group(7))
+            humidity = float(m.group(8))
             
             # 数据转换
             soil_moisture = round(soil_raw / 1023.0 * 100, 1)
@@ -254,7 +271,7 @@ def main():
             if distance < 0:
                 water_level = 0.0
             else:
-                water_level = max(0, min(100, round((1 - distance / 50.0) * 100, 1)))
+                water_level = max(0, min(100, round(water_percent, 1)))
             
             flame_detected = (flame_level == 0)
             

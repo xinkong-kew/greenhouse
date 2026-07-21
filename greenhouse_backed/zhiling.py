@@ -1,8 +1,10 @@
 """
 串口 AT 指令发送脚本 - ADP-L610 双向通信
-1. POST 发送传感器数据到服务器
-2. GET 读取服务器控制命令
-3. 比对状态差异，自动发送控制指令
+1. 从 COM28 (Arduino) 读取真实传感器数据
+2. POST 发送传感器数据到服务器
+3. GET 读取服务器控制命令
+4. 比对状态差异，自动发送控制指令
+5. 下发阈值设置到 Arduino
 """
 
 import serial
@@ -16,37 +18,57 @@ import re
 SERIAL_PORT_ADP = 'COM23'
 BAUDRATE_ADP = 115200
 
-# Arduino 控制板（设备控制）
+# Arduino 控制板（传感器 + 设备控制）
 SERIAL_PORT_CTRL = 'COM28'
 BAUDRATE_CTRL = 9600
 
 CMD_INTERVAL = 0.5      # 每条指令间隔（秒）
 CYCLE_INTERVAL = 3       # 每轮执行间隔（秒）
 LINE_ENDING = '\r\n'    # AT 指令换行符
+SENSOR_READ_TIMEOUT = 3  # 读取传感器超时（秒）
 
-# ==================== 传感器数据（POST） ====================
-HTTP_POST_DATA = '{"temp":26.5,"hum":60.2,"soil":45.0,"co2":420,"flame":0,"pump":1}'
-HTTP_DATA_LEN = len(HTTP_POST_DATA.encode('utf-8'))
+# ==================== 串口数据正则 ====================
+# Arduino 输出格式（带 [#] 前缀或不带均可）
+SERIAL_PATTERN = re.compile(
+    r'土壤=(\d+)\s+CO2=(\d+)\s+人体=(\d)\s+火焰=(\d)\s+'
+    r'水位=([\d.]+)%\s+距离=(-?[\d.]+)cm\s+'
+    r'温度=([\d.]+)℃\s+湿度=([\d.]+)%'
+)
 
 # ==================== 本地设备状态追踪 ====================
-# 记录当前已知的设备状态，与服务器比对后决定是否发送控制指令
 CURRENT_DEVICE_STATE = {
     'pump': False,
     'fan': False,
     'motor': False,
-    'buzzer': False,
     'flame': True,    # 默认自动
     'human': True,    # 默认自动
 }
 
+# 本地阈值缓存（避免重复发送相同值）
+CURRENT_THRESHOLDS = {
+    'temp': None,
+    'hum': None,
+    'soil': None,
+    'water': None,
+    'co2': None,
+}
+
 # 设备控制命令映射（与 Arduino 端格式一致）
 DEVICE_CMD_MAP = {
-    'pump':   {True: '1',        False: '0'},
-    'fan':    {True: 'FAN_ON',   False: 'FAN_OFF'},
-    'motor':  {True: 'MOTOR_ON', False: 'MOTOR_OFF'},
-    'buzzer': {True: 'BUZZER_ON',False: 'BUZZER_OFF'},
-    'flame':  {True: 'FLAME_AUTO',False: 'FLAME_OFF'},
-    'human':  {True: 'HUMAN_AUTO',False: 'HUMAN_OFF'},
+    'pump':   {True: '1',            False: '0'},
+    'fan':    {True: 'FAN_ON',       False: 'FAN_OFF'},
+    'motor':  {True: 'SERVO_AUTO',   False: 'SERVO_MANUAL'},
+    'flame':  {True: 'FLAME_AUTO',   False: 'FLAME_OFF'},
+    'human':  {True: 'HUMAN_AUTO',   False: 'HUMAN_OFF'},
+}
+
+# 阈值指令映射
+THRESHOLD_CMD_MAP = {
+    'temp': 'SET_TEMP',
+    'hum': 'SET_HUMI',
+    'soil': 'SET_SOIL',
+    'water': 'SET_WATER',
+    'co2': 'SET_CO2',
 }
 
 
@@ -102,7 +124,6 @@ def parse_httpread_response(response):
     if not response:
         return None
     text = response.decode('utf-8', errors='ignore')
-    # 查找 JSON 部分（从 { 到 }）
     json_match = re.search(r'\{.*\}', text, re.DOTALL)
     if json_match:
         try:
@@ -112,6 +133,61 @@ def parse_httpread_response(response):
     return None
 
 
+# ==================== 读取 Arduino 传感器数据 ====================
+
+def read_sensor_line(ser_ctrl):
+    """从 Arduino 串口读取一行传感器数据，返回解析后的字典"""
+    deadline = time.time() + SENSOR_READ_TIMEOUT
+    while time.time() < deadline:
+        if ser_ctrl.in_waiting:
+            raw = ser_ctrl.readline()
+            if not raw:
+                time.sleep(0.1)
+                continue
+            line = raw.decode('utf-8', errors='ignore').strip()
+            if not line:
+                continue
+            # 尝试匹配传感器数据
+            m = SERIAL_PATTERN.search(line)
+            if m:
+                soil_raw = int(m.group(1))
+                co2_raw = int(m.group(2))
+                human_level = int(m.group(3))
+                flame_level = int(m.group(4))
+                water_percent = float(m.group(5))
+                distance = float(m.group(6))
+                temperature = float(m.group(7))
+                humidity = float(m.group(8))
+
+                # 土壤原始值转百分比
+                soil_percent = round(soil_raw / 1023.0 * 100, 1)
+                soil_percent = max(0, min(100, soil_percent))
+
+                # 火焰：level==0 表示检测到火焰
+                flame_detected = 1 if (flame_level == 0) else 0
+
+                print(f"  [传感器] 温度={temperature:.1f}℃ 湿度={humidity:.1f}% "
+                      f"土壤={soil_percent:.1f}% 水位={water_percent:.1f}% "
+                      f"CO2={co2_raw} 火焰={flame_detected} 人体={human_level}")
+
+                return {
+                    'temp': round(temperature, 1),
+                    'hum': round(humidity, 1),
+                    'soil': soil_percent,
+                    'co2': co2_raw,
+                    'flame': flame_detected,
+                    'human': human_level,
+                    'water': round(water_percent, 1),
+                    'distance': round(distance, 1),
+                }
+        else:
+            time.sleep(0.2)
+    print("  ⚠️ 读取传感器超时，使用上次数据")
+    return None
+
+
+# ==================== 控制指令发送 ====================
+
 def send_control_command(ser_ctrl, device, turn_on):
     """向控制板串口发送设备控制指令"""
     cmd = DEVICE_CMD_MAP.get(device, {}).get(turn_on)
@@ -120,53 +196,81 @@ def send_control_command(ser_ctrl, device, turn_on):
         return False
 
     ser_ctrl.write((cmd + '\n').encode('utf-8'))
-    status = "开启" if turn_on else "关闭"
+    status = "开启/自动" if turn_on else "关闭/手动"
     print(f"[控制] 🔧 {device} → {status} (指令: {cmd}) → {SERIAL_PORT_CTRL}")
     time.sleep(0.3)
-    # 更新本地状态
     CURRENT_DEVICE_STATE[device] = turn_on
     return True
 
 
-def execute_post_sequence(ser):
-    """执行 POST 数据发送序列"""
-    print("  ── POST 发送传感器数据 ──")
-    # 1. AT+MIPCALL=1
-    send_at(ser, 'AT+MIPCALL=1', wait=CMD_INTERVAL)
-    # 2. 设置 URL
-    send_at(ser, 'AT+HTTPSET="URL","shijie-smartline.club:80/api/adp610/data"', wait=CMD_INTERVAL)
-    # 3. 设置 User-Agent
-    send_at(ser, 'AT+HTTPSET="UAGENT","fibocom"', wait=CMD_INTERVAL)
-    # 4. 设置数据长度
-    send_at(ser, f'AT+HTTPDATA={HTTP_DATA_LEN}', wait=CMD_INTERVAL)
-    # 5. 发送 JSON 数据
-    send_raw(ser, HTTP_POST_DATA, wait=CMD_INTERVAL)
-    # 6. 执行 POST
-    send_at(ser, 'AT+HTTPACT=1,30', wait=1.0)
+def send_threshold_command(ser_ctrl, th_type, value):
+    """向控制板发送阈值设置指令"""
+    if value is None:
+        return False
+    cmd_prefix = THRESHOLD_CMD_MAP.get(th_type)
+    if not cmd_prefix:
+        return False
+    # 跳过已发送过的相同值
+    if CURRENT_THRESHOLDS.get(th_type) == value:
+        return False
+
+    cmd = f"{cmd_prefix} {value}"
+    ser_ctrl.write((cmd + '\n').encode('utf-8'))
+    print(f"[阈值] 📤 {th_type} → {value} (指令: {cmd}) → {SERIAL_PORT_CTRL}")
+    time.sleep(0.3)
+    CURRENT_THRESHOLDS[th_type] = value
+    return True
 
 
-def execute_get_sequence(ser):
+# ==================== HTTP 通信序列 ====================
+
+def execute_post_sequence(ser_adp, sensor_data):
+    """执行 POST 数据发送序列，使用真实传感器数据"""
+    if not sensor_data:
+        print("  ⚠️ 无传感器数据，跳过 POST")
+        return
+
+    # 构建 JSON 载荷（使用服务器字段名）
+    payload = {
+        'temp': sensor_data.get('temp', 0),
+        'hum': sensor_data.get('hum', 0),
+        'soil': sensor_data.get('soil', 0),
+        'co2': sensor_data.get('co2', 0),
+        'flame': sensor_data.get('flame', 0),
+        'pump': 1 if CURRENT_DEVICE_STATE.get('pump') else 0,
+    }
+    json_str = json.dumps(payload, ensure_ascii=False)
+    data_len = len(json_str.encode('utf-8'))
+
+    print(f"  ── POST 发送传感器数据 ({data_len} 字节) ──")
+    print(f"  JSON: {json_str}")
+
+    send_at(ser_adp, 'AT+MIPCALL=1', wait=CMD_INTERVAL)
+    send_at(ser_adp, 'AT+HTTPSET="URL","shijie-smartline.club:80/api/adp610/data"', wait=CMD_INTERVAL)
+    send_at(ser_adp, 'AT+HTTPSET="UAGENT","fibocom"', wait=CMD_INTERVAL)
+    send_at(ser_adp, f'AT+HTTPDATA={data_len}', wait=CMD_INTERVAL)
+    send_raw(ser_adp, json_str, wait=CMD_INTERVAL)
+    send_at(ser_adp, 'AT+HTTPACT=1,30', wait=1.0)
+
+
+def execute_get_sequence(ser_adp):
     """执行 GET 命令读取序列，返回解析后的服务器指令"""
     print("  ── GET 读取服务器指令 ──")
-    # 1. AT+MIPCALL=1
-    send_at(ser, 'AT+MIPCALL=1', wait=CMD_INTERVAL)
-    # 2. 设置 URL（同一地址，服务器根据 method 区分）
-    send_at(ser, 'AT+HTTPSET="URL","shijie-smartline.club:80/api/adp610/data"', wait=CMD_INTERVAL)
-    # 3. 设置 User-Agent
-    send_at(ser, 'AT+HTTPSET="UAGENT","fibocom"', wait=CMD_INTERVAL)
-    # 4. 执行 GET 请求
-    send_at(ser, 'AT+HTTPACT=0,30', wait=2.0)
-    # 5. 读取响应内容
-    resp = send_at(ser, 'AT+HTTPREAD', wait=1.0)
-    # 解析 JSON
+    send_at(ser_adp, 'AT+MIPCALL=1', wait=CMD_INTERVAL)
+    send_at(ser_adp, 'AT+HTTPSET="URL","shijie-smartline.club:80/api/adp610/data"', wait=CMD_INTERVAL)
+    send_at(ser_adp, 'AT+HTTPSET="UAGENT","fibocom"', wait=CMD_INTERVAL)
+    send_at(ser_adp, 'AT+HTTPACT=0,30', wait=2.0)
+    resp = send_at(ser_adp, 'AT+HTTPREAD', wait=1.0)
     data = parse_httpread_response(resp)
     if data and data.get('success') and data.get('commands'):
         return data['commands']
     return None
 
 
+# ==================== 状态同步 ====================
+
 def sync_device_state(ser_ctrl, server_commands):
-    """比对服务器指令与本地状态，发送差异控制指令到控制板"""
+    """比对服务器指令与本地状态，发送差异控制指令"""
     if not server_commands:
         return False
 
@@ -189,48 +293,67 @@ def sync_device_state(ser_ctrl, server_commands):
     return changed
 
 
+def sync_thresholds(ser_ctrl, server_commands):
+    """从服务器读取阈值并下发到 Arduino"""
+    if not server_commands:
+        return False
+
+    th_cmds = server_commands.get('threshold', {})
+    if not th_cmds:
+        return False
+
+    changed = False
+    for th_type, value in th_cmds.items():
+        if value is not None:
+            if send_threshold_command(ser_ctrl, th_type, value):
+                changed = True
+
+    if not changed:
+        print("  ✅ 阈值一致，无需修改")
+    return changed
+
+
+# ==================== 主循环 ====================
+
 def main():
-    print(f"🚀 ADP-L610 双向通信工具")
+    print(f"🚀 ADP-L610 双向通信工具（真实传感器数据）")
     print(f"ADP-L610 (HTTP): {SERIAL_PORT_ADP} @ {BAUDRATE_ADP} baud")
-    print(f"控制板 (指令):   {SERIAL_PORT_CTRL} @ {BAUDRATE_CTRL} baud")
+    print(f"Arduino (传感器): {SERIAL_PORT_CTRL} @ {BAUDRATE_CTRL} baud")
     print(f"服务器: shijie-smartline.club:80/api/adp610/data")
-    print(f"发送数据: {HTTP_POST_DATA}")
     print(f"指令间隔: {CMD_INTERVAL}s | 循环间隔: {CYCLE_INTERVAL}s\n")
 
-    # 列出可用串口
+    last_sensor_data = None  # 缓存上次传感器数据，读取失败时使用
+
     list_ports()
     print()
 
-    # 连接 ADP-L610 串口（HTTP 通信，带重试）
+    # 连接 ADP-L610
     ser_adp = None
     while ser_adp is None:
         try:
             ser_adp = serial.Serial(
-                port=SERIAL_PORT_ADP,
-                baudrate=BAUDRATE_ADP,
-                timeout=1,
-                write_timeout=1
+                port=SERIAL_PORT_ADP, baudrate=BAUDRATE_ADP,
+                timeout=1, write_timeout=1
             )
             print(f"✅ ADP-L610 已连接: {SERIAL_PORT_ADP}\n")
         except serial.SerialException as e:
             print(f"❌ {SERIAL_PORT_ADP} 连接失败: {e}")
-            print(f"⏳ 5 秒后重试...")
             time.sleep(5)
 
-    # 连接控制板串口（设备控制，带重试）
+    # 连接 Arduino
     ser_ctrl = None
     while ser_ctrl is None:
         try:
             ser_ctrl = serial.Serial(
-                port=SERIAL_PORT_CTRL,
-                baudrate=BAUDRATE_CTRL,
-                timeout=1,
-                write_timeout=1
+                port=SERIAL_PORT_CTRL, baudrate=BAUDRATE_CTRL,
+                timeout=1, write_timeout=1
             )
-            print(f"✅ 控制板已连接: {SERIAL_PORT_CTRL}\n")
+            # 清空缓冲区，丢弃启动打印信息
+            time.sleep(2)
+            ser_ctrl.reset_input_buffer()
+            print(f"✅ Arduino 已连接: {SERIAL_PORT_CTRL}\n")
         except serial.SerialException as e:
             print(f"❌ {SERIAL_PORT_CTRL} 连接失败: {e}")
-            print(f"⏳ 5 秒后重试...")
             time.sleep(5)
 
     round_count = 0
@@ -241,19 +364,31 @@ def main():
             print(f"📡 第 {round_count} 轮")
             print(f"{'='*50}")
 
-            # ===== 第一步：POST 发送传感器数据 =====
-            execute_post_sequence(ser_adp)
+            # ===== 第一步：读取 Arduino 传感器数据 =====
+            sensor_data = read_sensor_line(ser_ctrl)
+            if sensor_data:
+                last_sensor_data = sensor_data
+            else:
+                sensor_data = last_sensor_data  # 用缓存数据
 
-            # ===== 第二步：GET 读取服务器指令 =====
+            # ===== 第二步：POST 发送传感器数据到服务器 =====
+            execute_post_sequence(ser_adp, sensor_data)
+
+            # ===== 第三步：GET 读取服务器指令 =====
             server_commands = execute_get_sequence(ser_adp)
 
-            # ===== 第三步：比对状态并发送控制指令到控制板 =====
             if server_commands:
-                print("  ── 比对设备状态 ──")
                 print(f"  服务器指令: {json.dumps(server_commands, ensure_ascii=False)}")
+
+                # ===== 第四步：比对设备状态 =====
+                print("  ── 比对设备状态 ──")
                 sync_device_state(ser_ctrl, server_commands)
+
+                # ===== 第五步：下发阈值 =====
+                print("  ── 比对阈值 ──")
+                sync_thresholds(ser_ctrl, server_commands)
             else:
-                print("  ⚠️ 未能获取服务器指令，跳过状态比对")
+                print("  ⚠️ 未能获取服务器指令")
 
             print(f"\n✅ 第 {round_count} 轮完成")
             print(f"--- 等待 {CYCLE_INTERVAL} 秒后开始下一轮 ---")
@@ -273,7 +408,7 @@ def main():
             print("🔌 ADP-L610 串口已关闭")
         if ser_ctrl and ser_ctrl.is_open:
             ser_ctrl.close()
-            print("🔌 控制板串口已关闭")
+            print("🔌 Arduino 串口已关闭")
 
 
 if __name__ == '__main__':

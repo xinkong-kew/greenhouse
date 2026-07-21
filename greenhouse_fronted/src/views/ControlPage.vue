@@ -123,21 +123,19 @@
               <span class="toggle-slider"></span>
             </label>
             <span :class="deviceStatus[device.key] ? 'status-on' : 'status-off'">
-              {{ device.key === 'flame' || device.key === 'human' ? (deviceStatus[device.key] ? '自动' : '已关闭') : (deviceStatus[device.key] ? '已开启' : '已关闭') }}
+              {{ deviceStatus[device.key] ? (deviceAutoMode[device.key] ? '自动' : '已开启') : '已关闭' }}
             </span>
             <button class="btn btn-sm btn-auto" @click="setDeviceAuto(device.key)" :title="'切换' + device.label + '为自动模式'" v-if="device.key !== 'flame' && device.key !== 'human'">
               🔄 自动
             </button>
           </div>
         </div>
-      </div>
-      <!-- 一键自动按钮 -->
-      <div class="all-auto-row">
-        <button class="btn btn-all-auto" @click="setAllAuto" :disabled="allAutoLoading">
-          <span class="all-auto-icon">🤖</span>
-          <span>{{ allAutoLoading ? '正在设置...' : '一键自动' }}</span>
-        </button>
-        <span class="all-auto-hint">将全部设备切换为自动控制模式</span>
+        <!-- 一键自动卡片 -->
+        <div class="control-card card all-auto-card" @click="setAllAuto">
+          <div class="all-auto-label">一键自动</div>
+          <div class="all-auto-sub" v-if="!allAutoLoading">全部切换自动模式</div>
+          <div class="all-auto-sub loading" v-else>正在设置...</div>
+        </div>
       </div>
     </div>
 
@@ -202,6 +200,15 @@ const deviceStatus = reactive({
   motor: false,
   flame: true,   // 默认自动
   human: true    // 默认自动
+})
+
+// 设备是否处于自动模式（用于区分"自动"和"已开启"的显示）
+const deviceAutoMode = reactive({
+  pump: true,
+  fan: true,
+  motor: true,
+  flame: true,
+  human: true
 })
 
 const allAutoLoading = ref(false)
@@ -341,6 +348,7 @@ function toggleDevice(device) {
     .then(data => {
       if (data.success) {
         deviceStatus[device] = !current
+        deviceAutoMode[device] = false  // 手动操作退出自动模式
         const actionText = isAlarm ? (action === 'auto' ? '自动' : '关闭') : (action === 'on' ? '开启' : '关闭')
         addCmdLog('device', `${labelMap[device] || device} → ${actionText}`)
       } else {
@@ -364,12 +372,16 @@ function setDeviceAuto(device) {
     .then(res => res.json())
     .then(data => {
       if (data.success) {
+        deviceStatus[device] = true
+        deviceAutoMode[device] = true
         addCmdLog('device', `${labelMap[device] || device} → 启动自动工作模式`)
       } else {
         addCmdLog('device', `${labelMap[device] || device} 自动模式设置失败`)
       }
     })
     .catch(() => {
+      deviceStatus[device] = true
+      deviceAutoMode[device] = true
       addCmdLog('device', `${labelMap[device] || device} → 启动自动工作模式`)
     })
 }
@@ -379,7 +391,6 @@ function setAllAuto() {
   addCmdLog('device', '🤖 一键自动：设置全部设备为自动模式')
 
   const promises = deviceList.map(device => {
-    const action = (device.key === 'flame' || device.key === 'human') ? 'auto' : 'auto'
     return fetch('/api/device/control', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -389,10 +400,12 @@ function setAllAuto() {
       .then(data => {
         if (data.success) {
           deviceStatus[device.key] = true
+          deviceAutoMode[device.key] = true
         }
       })
       .catch(() => {
         deviceStatus[device.key] = true
+        deviceAutoMode[device.key] = true
       })
   })
 
@@ -973,47 +986,39 @@ onUnmounted(() => {
   border-color: rgba(0, 212, 255, 0.35);
 }
 
-.all-auto-row {
+.all-auto-card {
+  cursor: pointer;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-  margin-top: 14px;
-  padding: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 10px;
-  border: 1px dashed rgba(255, 255, 255, 0.08);
-}
-.btn-all-auto {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 24px;
-  font-size: 15px;
-  font-weight: 600;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: #fff;
+  gap: 6px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+  border: 1px dashed rgba(102, 126, 234, 0.3);
   transition: all 0.3s ease;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+  min-height: 120px;
+  user-select: none;
 }
-.btn-all-auto:hover {
+.all-auto-card:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.25) 0%, rgba(118, 75, 162, 0.25) 100%);
+  border-color: rgba(102, 126, 234, 0.5);
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
 }
-.btn-all-auto:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
+.all-auto-card .all-auto-icon-wrap {
+  font-size: 30px;
+  line-height: 1;
 }
-.btn-all-auto .all-auto-icon {
-  font-size: 20px;
+.all-auto-card .all-auto-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c8d6e5;
 }
-.all-auto-hint {
-  font-size: 12px;
+.all-auto-card .all-auto-sub {
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.4);
+}
+.all-auto-card .all-auto-sub.loading {
+  color: #00d4ff;
 }
 .btn-query {
   font-size: 11px;

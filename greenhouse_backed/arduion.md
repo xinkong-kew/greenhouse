@@ -1,5 +1,6 @@
 #include "DHT.h"
-#include <U8x8lib.h>          // 轻量文本库，几乎不占 RAM
+#include <U8x8lib.h>
+#include <Servo.h>
 
 // ========== 引脚定义 ==========
 #define SOIL_PIN A0
@@ -16,23 +17,22 @@
 #define RED_LED 12
 #define PUMP_RELAY 8
 #define CO2_WARN_LED 9
+#define SERVO_PIN 10
 
 // 三种模式枚举
 #define BEEP_OFF    0
 #define BEEP_ON     1
 #define BEEP_AUTO   2
 
-// 原有阈值
+// 阈值变量
 float tempLimit = 40.0;
 int co2WarningThreshold = 700;
 const int waterTotalLength = 14;
 const unsigned int warmDelay = 2000;
 int soilThreshold = 350;
 bool pumpManual = false;
-
-// ===== 新增全局阈值 =====
-float humiLimit = 70.0;       // 空气湿度阈值
-int waterLowThreshold = 20;   // 水位下限报警阈值
+float humiLimit = 70.0;
+int waterLowThreshold = 20;
 
 byte flameBeepMode = BEEP_AUTO;
 byte humanBeepMode = BEEP_AUTO;
@@ -42,14 +42,17 @@ unsigned long bootStartTime;
 bool fanManualOverride = false;
 unsigned long loopCount = 0;
 
-// ---------- OLED 对象（U8x8，无帧缓冲）----------
-U8X8_SSD1306_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
+Servo myServo;
+bool servoAutoMode = true;        // true=自动（CO₂控制），false=手动
+int lastServoAngle = -1;
+
+U8X8_SSD1306_128X64_NONAME_SW_I2C u8x8(A5, A4, U8X8_PIN_NONE);
 
 // =========================================================
-//  显示函数：每行显示一个数据
+//  显示函数
 // =========================================================
 void updateDisplay(float temp, float humi, int soil, int co2, float water) {
-  u8x8.clearDisplay();          // 清屏，避免重叠
+  u8x8.clearDisplay();
   u8x8.setCursor(0, 0);
   u8x8.print("Temp:"); u8x8.print(temp, 1); u8x8.print("C");
   u8x8.setCursor(0, 1);
@@ -60,6 +63,21 @@ void updateDisplay(float temp, float humi, int soil, int co2, float water) {
   u8x8.print("CO2:"); u8x8.print(co2);
   u8x8.setCursor(0, 4);
   u8x8.print("Water:"); u8x8.print(water, 0); u8x8.print("%");
+}
+
+// =========================================================
+//  打印精简阈值汇总（自动每循环调用）
+// =========================================================
+void printThresholdSummary() {
+  Serial.print(F("阈值汇总: 温度=")); Serial.print(tempLimit,1); Serial.print(F("C"));
+  Serial.print(F(" 湿度=")); Serial.print(humiLimit,1); Serial.print(F("%"));
+  Serial.print(F(" 土壤=")); Serial.print(soilThreshold);
+  Serial.print(F(" CO2=")); Serial.print(co2WarningThreshold);
+  Serial.print(F(" 水位=")); Serial.print(waterLowThreshold); Serial.print(F("%"));
+  Serial.print(F(" 风扇=")); Serial.print(fanManualOverride ? "手动" : "自动");
+  Serial.print(F(" 水泵=")); Serial.print(pumpManual ? "手动" : "自动");
+  Serial.print(F(" 舵机=")); Serial.print(servoAutoMode ? "自动" : "手动");
+  Serial.println();
 }
 
 // =========================================================
@@ -90,12 +108,26 @@ void setup() {
   pinMode(CO2_WARN_LED, OUTPUT);
   digitalWrite(CO2_WARN_LED, LOW);
 
-  // ---------- OLED 初始化 ----------
-  u8x8.begin();
-  u8x8.setFont(u8x8_font_chroma48medium8_r);   // 清晰字体
-  u8x8.setCursor(0, 0);
+  // 舵机复位
+  myServo.attach(SERVO_PIN);
+  myServo.write(0);
+  lastServoAngle = 0;
+  Serial.println(F("舵机已复位到 0°"));
 
-  // 打印全部指令说明
+  u8x8.begin();
+  u8x8.setPowerSave(0);
+  u8x8.setFont(u8x8_font_chroma48medium8_r);
+  u8x8.clearDisplay();
+  u8x8.setCursor(0, 0);
+  u8x8.print("Hello, OLED!");
+  u8x8.setCursor(0, 1);
+  u8x8.print("Init OK");
+  delay(500);
+  u8x8.clearDisplay();
+
+  Serial.println(F("OLED 初始化完成"));
+
+  // 指令清单
   Serial.println(F("=== 指令清单 ==="));
   Serial.println(F("风扇: FAN_ON FAN_OFF FAN_AUTO | GET_TEMP SET_TEMP xx"));
   Serial.println(F("水泵: 1 / 0 / auto"));
@@ -105,11 +137,13 @@ void setup() {
   Serial.println(F("水位指令：GET_WATER  SET_WATER 数值"));
   Serial.println(F("土壤阈值：GET_SOIL   SET_SOIL 数值"));
   Serial.println(F("空气湿度：GET_HUMI   SET_HUMI 数值"));
+  Serial.println(F("舵机模式：SERVO_AUTO（自动CO₂控制） SERVO_MANUAL（手动）"));
+  Serial.println(F("手动指令：SERVO_0  SERVO_90  SERVO_180  SERVO_角度值"));
+  Serial.println(F("提示：阈值汇总将在每秒自动打印"));
+  Serial.println();
 
-  Serial.print(F("当前温度阈值: ")); Serial.println(tempLimit);
-  Serial.print(F("当前空气湿度阈值: ")); Serial.println(humiLimit);
-  Serial.print(F("当前土壤浇水阈值: ")); Serial.println(soilThreshold);
-  Serial.print(F("当前水位报警阈值: ")); Serial.println(waterLowThreshold);
+  // 首次打印阈值汇总
+  printThresholdSummary();
 }
 
 // =========================================================
@@ -127,7 +161,7 @@ void loop() {
     raw.trim();
     Serial.print(F("收到指令: '")); Serial.print(raw); Serial.println(F("'"));
 
-    // 风扇指令
+    // ----- 风扇 -----
     if (raw == "FAN_ON") {
       fanManualOverride = true;
       digitalWrite(FAN_PIN, LOW);
@@ -142,6 +176,7 @@ void loop() {
       fanManualOverride = false;
       Serial.println(F("-> 风扇自动温控模式"));
     }
+    // ----- 温度阈值 -----
     else if (raw == "GET_TEMP") {
       Serial.print(F("-> 当前温度阈值: ")); Serial.print(tempLimit); Serial.println(F(" °C"));
     }
@@ -156,7 +191,7 @@ void loop() {
         Serial.println(F("-> 无效温度值"));
       }
     }
-    // CO2指令
+    // ----- CO2阈值 -----
     else if (raw == "GET_CO2") {
       Serial.print(F("-> 当前CO2报警阈值: ")); Serial.println(co2WarningThreshold);
     }
@@ -171,7 +206,7 @@ void loop() {
         Serial.println(F("-> CO2阈值范围：0~1023"));
       }
     }
-    // 水泵手动指令
+    // ----- 水泵 -----
     else if (raw == "1") {
       pumpManual = true;
       digitalWrite(PUMP_RELAY, HIGH);
@@ -186,7 +221,7 @@ void loop() {
       pumpManual = false;
       Serial.println(F("-> 水泵切换湿度自动控制"));
     }
-    // 火焰蜂鸣
+    // ----- 火焰蜂鸣 -----
     else if (raw == "FLAME_ON") {
       flameBeepMode = BEEP_ON;
       digitalWrite(FLAME_BEEP, LOW);
@@ -201,7 +236,7 @@ void loop() {
       flameBeepMode = BEEP_AUTO;
       Serial.println(F("-> 火焰蜂鸣：自动模式（明火触发响）"));
     }
-    // 人体蜂鸣
+    // ----- 人体蜂鸣 -----
     else if (raw == "HUMAN_ON") {
       humanBeepMode = BEEP_ON;
       digitalWrite(HUMAN_BEEP, LOW);
@@ -216,8 +251,7 @@ void loop() {
       humanBeepMode = BEEP_AUTO;
       Serial.println(F("-> 人体蜂鸣：自动模式（人体触发响）"));
     }
-
-    // ========== 新增 水位阈值指令 ==========
+    // ----- 水位阈值 -----
     else if (raw == "GET_WATER") {
       Serial.print(F("-> 当前水位报警下限阈值："));
       Serial.print(waterLowThreshold); Serial.println(F(" %"));
@@ -226,17 +260,15 @@ void loop() {
       String valStr = raw.substring(10);
       valStr.trim();
       int newWaterTh = valStr.toInt();
-      if(newWaterTh >= 0 && newWaterTh <= 100)
-      {
+      if(newWaterTh >= 0 && newWaterTh <= 100) {
         waterLowThreshold = newWaterTh;
         Serial.print(F("-> 水位下限阈值设置为："));
         Serial.print(waterLowThreshold); Serial.println(F(" %"));
-      }else{
+      } else {
         Serial.println(F("-> 水位阈值合法范围：0~100"));
       }
     }
-
-    // ========== 新增 土壤湿度阈值指令 ==========
+    // ----- 土壤阈值 -----
     else if (raw == "GET_SOIL") {
       Serial.print(F("-> 当前土壤自动浇水阈值："));
       Serial.println(soilThreshold);
@@ -245,17 +277,15 @@ void loop() {
       String valStr = raw.substring(9);
       valStr.trim();
       int newSoilTh = valStr.toInt();
-      if(newSoilTh >= 0 && newSoilTh <= 1023)
-      {
+      if(newSoilTh >= 0 && newSoilTh <= 1023) {
         soilThreshold = newSoilTh;
         Serial.print(F("-> 土壤浇水阈值修改为："));
         Serial.println(soilThreshold);
-      }else{
+      } else {
         Serial.println(F("-> 土壤阈值合法范围：0~1023"));
       }
     }
-
-    // ========== 新增 空气湿度阈值指令 ==========
+    // ----- 空气湿度阈值 -----
     else if (raw == "GET_HUMI") {
       Serial.print(F("-> 当前空气湿度报警阈值："));
       Serial.print(humiLimit); Serial.println(F(" %"));
@@ -264,16 +294,66 @@ void loop() {
       String valStr = raw.substring(9);
       valStr.trim();
       float newHumiTh = valStr.toFloat();
-      if(newHumiTh > 0 && newHumiTh < 100)
-      {
+      if(newHumiTh > 0 && newHumiTh < 100) {
         humiLimit = newHumiTh;
         Serial.print(F("-> 空气湿度阈值设置为："));
         Serial.print(humiLimit); Serial.println(F(" %"));
-      }else{
+      } else {
         Serial.println(F("-> 空气湿度合法范围：0~100"));
       }
     }
-
+    // ========== 舵机控制 ==========
+    else if (raw == "SERVO_AUTO") {
+      servoAutoMode = true;
+      Serial.println(F("-> 舵机切换为自动模式（CO₂控制）"));
+    }
+    else if (raw == "SERVO_MANUAL") {
+      servoAutoMode = false;
+      Serial.println(F("-> 舵机切换为手动模式"));
+    }
+    else if (raw == "SERVO_0") {
+      if (!servoAutoMode) {
+        myServo.write(0);
+        lastServoAngle = 0;
+        Serial.println(F("-> 舵机转到 0°"));
+      } else {
+        Serial.println(F("-> 当前为自动模式，请先切换至手动"));
+      }
+    }
+    else if (raw == "SERVO_90") {
+      if (!servoAutoMode) {
+        myServo.write(90);
+        lastServoAngle = 90;
+        Serial.println(F("-> 舵机转到 90°"));
+      } else {
+        Serial.println(F("-> 当前为自动模式，请先切换至手动"));
+      }
+    }
+    else if (raw == "SERVO_180") {
+      if (!servoAutoMode) {
+        myServo.write(180);
+        lastServoAngle = 180;
+        Serial.println(F("-> 舵机转到 180°"));
+      } else {
+        Serial.println(F("-> 当前为自动模式，请先切换至手动"));
+      }
+    }
+    else if (raw.startsWith("SERVO_")) {
+      if (!servoAutoMode) {
+        String valStr = raw.substring(6);
+        valStr.trim();
+        int angle = valStr.toInt();
+        if (angle >= 0 && angle <= 180) {
+          myServo.write(angle);
+          lastServoAngle = angle;
+          Serial.print(F("-> 舵机转到 ")); Serial.print(angle); Serial.println(F("°"));
+        } else {
+          Serial.println(F("-> 角度范围 0~180"));
+        }
+      } else {
+        Serial.println(F("-> 当前为自动模式，请先切换至手动"));
+      }
+    }
     else {
       Serial.print(F("-> 未知指令: ")); Serial.println(raw);
     }
@@ -302,18 +382,24 @@ void loop() {
     waterPercent = (waterTotalLength - distance) / waterTotalLength * 100.0;
     if (waterPercent > 100) waterPercent = 100.0;
     if (waterPercent < 0) waterPercent = 0.0;
+  } else {
+    waterPercent = 0.0;
   }
 
   float humidity = dht.readHumidity();
   float temp = dht.readTemperature();
 
-  // ---------- 串口打印 ----------
+  // ---------- 串口打印传感器实时值（第一行，已删除“阈值”字段） ----------
   Serial.print(F("土壤=")); Serial.print(soilValue);
   Serial.print(F(" CO2=")); Serial.print(co2Raw);
   Serial.print(F(" 人体=")); Serial.print(humanVal);
   Serial.print(F(" 火焰=")); Serial.print(flameVal);
   Serial.print(F(" 水位=")); Serial.print(waterPercent,1); Serial.print(F("%"));
+  Serial.print(F(" 距离=")); Serial.print(distance,1); Serial.print(F("cm"));
   Serial.print(F(" 温度=")); Serial.print(temp); Serial.print(F("℃ 湿度=")); Serial.print(humidity); Serial.println(F("%"));
+
+  // ---------- 自动打印阈值汇总（第二行） ----------
+  printThresholdSummary();
 
   // ---------- 火焰蜂鸣 ----------
   if (flameBeepMode == BEEP_ON) {
@@ -338,7 +424,7 @@ void loop() {
   }
 
   // ---------- 缺水红灯 ----------
-  if (distance > waterTotalLength && distance != -1) {
+  if (distance == -1 || waterPercent < waterLowThreshold) {
     digitalWrite(RED_LED, HIGH);
   } else {
     digitalWrite(RED_LED, LOW);
@@ -359,6 +445,16 @@ void loop() {
   // ---------- 水泵自动控制 ----------
   if (!pumpManual) {
     digitalWrite(PUMP_RELAY, (soilValue < soilThreshold) ? HIGH : LOW);
+  }
+
+  // ========== 舵机自动控制（CO₂） ==========
+  if (servoAutoMode) {
+    int targetAngle = (co2Raw > co2WarningThreshold) ? 180 : 0;
+    if (targetAngle != lastServoAngle) {
+      myServo.write(targetAngle);
+      lastServoAngle = targetAngle;
+      Serial.print(F("舵机自动调整到 ")); Serial.print(targetAngle); Serial.println(F("° (CO₂控制)"));
+    }
   }
 
   // ---------- 刷新 OLED ----------

@@ -279,7 +279,7 @@ import { reactive, ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import socket from '../utils/socket.js'
 import Chart from 'chart.js/auto'
 import ChinaMapV2 from '../components/ChinaMapV2.vue'
-import { sharedCity, updateCity } from '../stores/sharedCity.js'
+import { sharedCity, updateCity, initCityFromServer } from '../stores/sharedCity.js'
 
 // ===== 传感器 =====
 const sensors = reactive({
@@ -687,7 +687,7 @@ function handleWeatherUpdate(data) {
   // 如果用户手动选择了城市，保留中文名
   if (!weather.city || weather.city === '加载中...' || weather.city === '未知') {
     weather.city = fc.city || '未知'
-    updateCity(weather.city, fc.city_en || '')
+    initCityFromServer(weather.city, fc.city_en || '')
   }
   const forecastListRaw = fc.forecast || []
   if (forecastListRaw.length > 0) {
@@ -756,7 +756,7 @@ onMounted(async () => {
     const data = await res.json()
     if (data.success && data.city) {
       weather.city = data.city
-      updateCity(data.city, data.city_en || '')
+      initCityFromServer(data.city, data.city_en || '')
     }
   } catch {
     // 静默
