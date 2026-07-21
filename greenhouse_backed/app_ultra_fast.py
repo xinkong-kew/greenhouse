@@ -85,6 +85,79 @@ device_status_cache = {
 # 阈值缓存 - 记录已设置的阈值
 threshold_cache = {}
 
+# 阈值数据库表名
+THRESHOLD_TABLE = 'threshold_config'
+
+def _ensure_threshold_table():
+    """确保阈值配置表存在"""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        c = conn.cursor()
+        c.execute(f"""
+            CREATE TABLE IF NOT EXISTS {THRESHOLD_TABLE} (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                config_key VARCHAR(50) NOT NULL UNIQUE,
+                config_value FLOAT,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        c.close()
+        conn.close()
+    except mysql.connector.Error as e:
+        print(f"[阈值] 建表失败: {e}")
+        try:
+            conn.close()
+        except:
+            pass
+
+def _load_thresholds_from_db():
+    """从数据库加载阈值到缓存"""
+    _ensure_threshold_table()
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        c = conn.cursor(dictionary=True)
+        c.execute(f"SELECT config_key, config_value FROM {THRESHOLD_TABLE}")
+        rows = c.fetchall()
+        c.close()
+        conn.close()
+        for row in rows:
+            threshold_cache[row['config_key']] = row['config_value']
+        if rows:
+            print(f"[阈值] 已从数据库加载 {len(rows)} 个阈值")
+    except mysql.connector.Error as e:
+        print(f"[阈值] 加载失败: {e}")
+        try:
+            conn.close()
+        except:
+            pass
+
+def _save_threshold_to_db(th_type, value):
+    """保存阈值到数据库"""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        c = conn.cursor()
+        c.execute(f"""
+            INSERT INTO {THRESHOLD_TABLE} (config_key, config_value, updated_at)
+            VALUES (%s, %s, NOW())
+            ON DUPLICATE KEY UPDATE config_value = %s, updated_at = NOW()
+        """, (th_type, value, value))
+        conn.commit()
+        c.close()
+        conn.close()
+    except mysql.connector.Error as e:
+        print(f"[阈值] 保存到数据库失败: {e}")
+        try:
+            conn.close()
+        except:
+            pass
+
 # ==================== 天气智能体 ====================
 weather_agent = None
 weather_agent_ready = False
@@ -1080,6 +1153,8 @@ def api_threshold_set():
             json.dump({'cmd': cmd, 'pending': True}, f)
         # 缓存已设置的阈值
         threshold_cache[th_type] = value
+        # 写入数据库持久化
+        _save_threshold_to_db(th_type, value)
         print(f"[阈值] 写入指令: {cmd}")
         return jsonify({'success': True, 'cmd': cmd, 'message': f'指令 {cmd} 已发送'})
     except Exception as e:
@@ -1399,26 +1474,40 @@ def api_device_commands():
     db_status = {'pump_status': False, 'fan_status': False,
                  'motor_status': False, 'buzzer_status': False,
                  'flame_detected': False}
+    db_threshold = {}
+    db_sensor = {}
 
     conn = get_db_connection()
     if conn:
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                SELECT pump_status, fan_status, motor_status, buzzer_status, flame_detected
+                SELECT temperature, humidity, soil_moisture, water_level, co2,
+                       pump_status, fan_status, motor_status, buzzer_status, flame_detected
                 FROM sensor_data
                 ORDER BY timestamp DESC
                 LIMIT 1
             """)
             row = cursor.fetchone()
             if row:
-                db_status = {
-                    'pump_status': bool(row[0]),
-                    'fan_status': bool(row[1]),
-                    'motor_status': bool(row[2]),
-                    'buzzer_status': bool(row[3]),
-                    'flame_detected': bool(row[4]),
+                db_sensor = {
+                    'temperature': float(row[0]) if row[0] is not None else None,
+                    'humidity': float(row[1]) if row[1] is not None else None,
+                    'soil_moisture': float(row[2]) if row[2] is not None else None,
+                    'water_level': float(row[3]) if row[3] is not None else None,
+                    'co2': int(row[4]) if row[4] is not None else None,
                 }
+                db_status = {
+                    'pump_status': bool(row[5]),
+                    'fan_status': bool(row[6]),
+                    'motor_status': bool(row[7]),
+                    'buzzer_status': bool(row[8]),
+                    'flame_detected': bool(row[9]),
+                }
+            # 同时读取阈值
+            cursor.execute(f"SELECT config_key, config_value FROM {THRESHOLD_TABLE}")
+            for row in cursor.fetchall():
+                db_threshold[row[0]] = row[1]
             cursor.close()
             conn.close()
         except mysql.connector.Error:
@@ -1426,6 +1515,13 @@ def api_device_commands():
             conn.close()
 
     commands = {
+        'sensor': {
+            'temperature': db_sensor.get('temperature'),
+            'humidity': db_sensor.get('humidity'),
+            'soil_moisture': db_sensor.get('soil_moisture'),
+            'water_level': db_sensor.get('water_level'),
+            'co2': db_sensor.get('co2'),
+        },
         'device': {
             'pump': db_status['pump_status'],
             'fan': db_status['fan_status'],
@@ -1435,11 +1531,11 @@ def api_device_commands():
             'human': device_status_cache.get('human_status', True),
         },
         'threshold': {
-            'temp': threshold_cache.get('temp'),
-            'hum': threshold_cache.get('hum'),
-            'soil': threshold_cache.get('soil'),
-            'water': threshold_cache.get('water'),
-            'co2': threshold_cache.get('co2'),
+            'temp': db_threshold.get('temp', threshold_cache.get('temp')),
+            'hum': db_threshold.get('hum', threshold_cache.get('hum')),
+            'soil': db_threshold.get('soil', threshold_cache.get('soil')),
+            'water': db_threshold.get('water', threshold_cache.get('water')),
+            'co2': db_threshold.get('co2', threshold_cache.get('co2')),
         },
         'timestamp': datetime.now().isoformat()
     }
@@ -1763,6 +1859,8 @@ def init_app():
         except Exception:
             pass
         test_conn.close()
+        # 从数据库加载阈值
+        _load_thresholds_from_db()
     else:
         print("❌ 数据库连接失败")
         print("请确保 MySQL 服务已启动")
