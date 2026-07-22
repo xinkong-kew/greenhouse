@@ -82,6 +82,16 @@ device_status_cache = {
     'last_update': None
 }
 
+# 设备动作缓存 - 存储 'on'/'off'/'auto' 字符串，供 zhiling.py 精确控制
+# 解决 device_status_cache 只存 bool 无法区分 on 和 auto 的问题
+device_action_cache = {
+    'pump': 'off',
+    'fan': 'off',
+    'motor': 'off',
+    'flame': 'auto',
+    'human': 'auto',
+}
+
 # 阈值缓存 - 记录已设置的阈值
 threshold_cache = {}
 
@@ -1268,6 +1278,8 @@ def api_device_control():
             device_status_cache[db_field] = is_on
         elif is_alarm:
             device_status_cache[f'{device}_status'] = is_on
+        # 更新动作缓存（存储 'on'/'off'/'auto' 字符串）
+        device_action_cache[device] = action
         
         # 3. 写入串口指令文件（serial_to_db_fixed.py 会读取并发送）
         with open(CMD_FILE, 'w') as f:
@@ -1512,14 +1524,14 @@ def api_device_commands():
             'water_level': db_sensor.get('water_level'),
             'co2': db_sensor.get('co2'),
         },
-        # 设备状态从内存缓存读取（前端控制实时更新，不受数据库覆盖影响）
+        # 设备状态从动作缓存读取（存储 'on'/'off'/'auto' 字符串）
         'device': {
-            'pump': device_status_cache.get('pump_status', False),
-            'fan': device_status_cache.get('fan_status', False),
-            'motor': device_status_cache.get('motor_status', False),
-            'buzzer': device_status_cache.get('buzzer_status', False),
-            'flame': device_status_cache.get('flame_status', True),
-            'human': device_status_cache.get('human_status', True),
+            'pump': device_action_cache.get('pump', 'off'),
+            'fan': device_action_cache.get('fan', 'off'),
+            'motor': device_action_cache.get('motor', 'off'),
+            'buzzer': device_action_cache.get('buzzer', 'off'),
+            'flame': device_action_cache.get('flame', 'auto'),
+            'human': device_action_cache.get('human', 'auto'),
         },
         'threshold': {
             'temp': db_threshold.get('temp', threshold_cache.get('temp')),

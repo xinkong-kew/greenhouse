@@ -40,11 +40,11 @@ SERIAL_PATTERN = re.compile(
 
 # ==================== 本地设备状态追踪 ====================
 CURRENT_DEVICE_STATE = {
-    'pump': False,
-    'fan': False,
-    'motor': False,
-    'flame': True,    # 默认自动
-    'human': True,    # 默认自动
+    'pump': 'off',
+    'fan': 'off',
+    'motor': 'off',
+    'flame': 'auto',
+    'human': 'auto',
 }
 
 # 本地阈值缓存（避免重复发送相同值）
@@ -58,11 +58,11 @@ CURRENT_THRESHOLDS = {
 
 # 设备控制命令映射（与 Arduino 端格式一致）
 DEVICE_CMD_MAP = {
-    'pump':   {True: '1',            False: '0'},
-    'fan':    {True: 'FAN_ON',       False: 'FAN_OFF'},
-    'motor':  {True: 'SERVO_AUTO',   False: 'SERVO_MANUAL'},
-    'flame':  {True: 'FLAME_AUTO',   False: 'FLAME_OFF'},
-    'human':  {True: 'HUMAN_AUTO',   False: 'HUMAN_OFF'},
+    'pump':   {'on': '1',           'off': '0',        'auto': 'auto'},
+    'fan':    {'on': 'FAN_ON',      'off': 'FAN_OFF',   'auto': 'FAN_AUTO'},
+    'motor':  {'on': 'SERVO_AUTO',  'off': 'SERVO_MANUAL', 'auto': 'SERVO_AUTO'},
+    'flame':  {'on': 'FLAME_ON',    'off': 'FLAME_OFF', 'auto': 'FLAME_AUTO'},
+    'human':  {'on': 'HUMAN_ON',    'off': 'HUMAN_OFF', 'auto': 'HUMAN_AUTO'},
 }
 
 # 阈值指令映射
@@ -255,20 +255,44 @@ def read_sensor_line(ser_ctrl):
     return None
 
 
-# ==================== 控制指令发送 ====================
+# 阈值汇总正则 - 解析 Arduino 实际设备状态
+THRESHOLD_SUMMARY_PATTERN = re.compile(
+    r'阈值汇总:.*?风扇=(\S+)\s+水泵=(\S+)\s+舵机=(\S+)'
+)
 
-def send_control_command(ser_ctrl, device, turn_on):
-    """向控制板串口发送设备控制指令"""
-    cmd = DEVICE_CMD_MAP.get(device, {}).get(turn_on)
+
+def parse_arduino_status(line):
+    """从 Arduino 阈值汇总行解析设备实际状态，更新 CURRENT_DEVICE_STATE"""
+    m = THRESHOLD_SUMMARY_PATTERN.search(line)
+    if not m:
+        return False
+    # 风扇=自动 → 'auto', 风扇=手动 → 保持原值不变
+    fan_status = m.group(1)
+    pump_status = m.group(2)
+    motor_status = m.group(3)
+
+    if fan_status == '自动':
+        CURRENT_DEVICE_STATE['fan'] = 'auto'
+    if pump_status == '自动':
+        CURRENT_DEVICE_STATE['pump'] = 'auto'
+    if motor_status == '自动':
+        CURRENT_DEVICE_STATE['motor'] = 'auto'
+
+    print(f"  [Arduino状态] 风扇={fan_status} 水泵={pump_status} 舵机={motor_status}")
+    return True
+
+def send_control_command(ser_ctrl, device, action):
+    """向控制板串口发送设备控制指令（action: 'on'/'off'/'auto'）"""
+    cmd = DEVICE_CMD_MAP.get(device, {}).get(action)
     if not cmd:
-        print(f"[控制] ⚠️ 未知设备: {device}")
+        print(f"[控制] ⚠️ 未知设备/动作: {device}={action}")
         return False
 
     ser_ctrl.write((cmd + '\n').encode('utf-8'))
-    status = "开启/自动" if turn_on else "关闭/手动"
-    print(f"[控制] 🔧 {device} → {status} (指令: {cmd}) → {SERIAL_PORT_CTRL}")
+    status_map = {'on': '开启', 'off': '关闭', 'auto': '自动'}
+    print(f"[控制] 🔧 {device} → {status_map.get(action, action)} (指令: {cmd}) → {SERIAL_PORT_CTRL}")
     time.sleep(0.3)
-    CURRENT_DEVICE_STATE[device] = turn_on
+    CURRENT_DEVICE_STATE[device] = action
     return True
 
 
@@ -339,7 +363,7 @@ def execute_get_sequence(ser_adp):
 # ==================== 状态同步 ====================
 
 def sync_device_state(ser_ctrl, server_commands):
-    """比对服务器指令与本地状态，发送差异控制指令"""
+    """比对服务器指令与本地状态，发送差异控制指令（action: 'on'/'off'/'auto'）"""
     if not server_commands:
         return False
 
@@ -348,13 +372,13 @@ def sync_device_state(ser_ctrl, server_commands):
         return False
 
     changed = False
-    for device, target_state in device_cmds.items():
+    for device, target_action in device_cmds.items():
         if device not in CURRENT_DEVICE_STATE:
             continue
         current = CURRENT_DEVICE_STATE[device]
-        if current != target_state:
-            print(f"  ⚡ 状态变化: {device} ({current} → {target_state})")
-            send_control_command(ser_ctrl, device, target_state)
+        if current != target_action:
+            print(f"  ⚡ 状态变化: {device} ({current} → {target_action})")
+            send_control_command(ser_ctrl, device, target_action)
             changed = True
 
     if not changed:
