@@ -120,12 +120,14 @@ def ensure_table(conn):
                 pump_status BOOLEAN DEFAULT FALSE,
                 fan_status BOOLEAN DEFAULT FALSE,
                 motor_status BOOLEAN DEFAULT FALSE,
-                buzzer_status BOOLEAN DEFAULT FALSE
+                buzzer_status BOOLEAN DEFAULT FALSE,
+                flame_status BOOLEAN DEFAULT TRUE,
+                human_status BOOLEAN DEFAULT TRUE
             )
         """)
         conn.commit()
         # 兼容旧表：尝试添加可能缺失的列
-        for col in ['co2']:
+        for col in ['co2', 'flame_status', 'human_status']:
             try:
                 c.execute(f"ALTER TABLE sensor_data ADD COLUMN {col} INT")
                 conn.commit()
@@ -137,16 +139,19 @@ def ensure_table(conn):
         print(f"建表失败: {e}")
 
 
-def insert_sensor_data(conn, temp, hum, soil, water, co2_val, flame, pump, fan, motor, buzzer):
+def insert_sensor_data(conn, temp, hum, soil, water, co2_val, flame, pump, fan, motor, buzzer, flame_status=None, human_status=None):
     """插入一条传感器数据"""
     try:
         c = conn.cursor()
         c.execute("""
             INSERT INTO sensor_data 
             (timestamp, temperature, humidity, soil_moisture, water_level, co2,
-             flame_detected, pump_status, fan_status, motor_status, buzzer_status) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (datetime.now(), temp, hum, soil, water, co2_val, flame, pump, fan, motor, buzzer))
+             flame_detected, pump_status, fan_status, motor_status, buzzer_status,
+             flame_status, human_status) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (datetime.now(), temp, hum, soil, water, co2_val, flame, pump, fan, motor, buzzer,
+              flame_status if flame_status is not None else DEVICE_STATES.get('flame', True),
+              human_status if human_status is not None else DEVICE_STATES.get('human', True)))
         conn.commit()
         c.close()
         return True
@@ -264,9 +269,8 @@ def main():
             temperature = float(m.group(7))
             humidity = float(m.group(8))
             
-            # 数据转换
-            soil_moisture = round(soil_raw / 1023.0 * 100, 1)
-            soil_moisture = max(0, min(100, soil_moisture))
+            # 数据转换（Arduino 已映射为百分比，直接使用）
+            soil_moisture = max(0, min(100, round(soil_raw, 1)))
             
             if distance < 0:
                 water_level = 0.0

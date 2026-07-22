@@ -712,6 +712,8 @@ function handleRealtimeUpdate(data) {
   if (data.pump_status != null) devices.pump.state = data.pump_status
   if (data.fan_status != null) devices.fan.state = data.fan_status
   if (data.motor_status != null) devices.motor.state = data.motor_status
+  if (data.flame_status != null) devices.flame.state = data.flame_status
+  if (data.human_status != null) devices.human.state = data.human_status
 }
 
 function handleWeatherUpdate(data) {

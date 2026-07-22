@@ -231,9 +231,8 @@ def read_sensor_line(ser_ctrl):
             temperature = float(m.group(7))
             humidity = float(m.group(8))
 
-            # 土壤原始值转百分比
-            soil_percent = round(soil_raw / 1023.0 * 100, 1)
-            soil_percent = max(0, min(100, soil_percent))
+            # 土壤（Arduino 已映射为百分比，直接使用）
+            soil_percent = max(0, min(100, soil_raw))
 
             # 火焰：level==0 表示检测到火焰
             flame_detected = 1 if (flame_level == 0) else 0

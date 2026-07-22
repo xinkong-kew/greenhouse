@@ -20,6 +20,9 @@ import os
 import subprocess
 import socket
 
+import serial
+import serial.tools.list_ports
+
 # 导入天气智能体
 from weather_agent import create_agent, WeatherAgent
 
@@ -372,7 +375,8 @@ def get_sensor_data_only():
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT temperature, humidity, soil_moisture, water_level, co2, timestamp
+            SELECT temperature, humidity, soil_moisture, water_level, co2, 
+                   flame_status, human_status, timestamp
             FROM sensor_data 
             ORDER BY timestamp DESC 
             LIMIT 1
@@ -389,7 +393,9 @@ def get_sensor_data_only():
                 'latest_soil': float(result[2]) if result[2] is not None else 0,
                 'latest_water': float(result[3]) if result[3] is not None else 0,
                 'latest_co2': int(result[4]) if result[4] is not None else 0,
-                'timestamp': result[5].isoformat() if result[5] else None
+                'flame_status': bool(result[5]) if result[5] is not None else True,
+                'human_status': bool(result[6]) if result[6] is not None else True,
+                'timestamp': result[7].isoformat() if result[7] else None
             }
         
         return None
@@ -1278,6 +1284,27 @@ def api_threshold_query():
 # 串口命令队列文件（仅用于发送指令到 Arduino）
 CMD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'serial_cmd.json')
 
+def send_serial_command_direct(cmd):
+    """尝试直接通过串口发送指令到 Arduino（绕过命令文件）"""
+    try:
+        # 查找 Arduino 串口
+        ports = list(serial.tools.list_ports.comports())
+        keywords = ['CH340', 'Arduino', 'USB-SERIAL', 'CP210']
+        for port in ports:
+            for kw in keywords:
+                if kw.upper() in port.description.upper():
+                    try:
+                        s = serial.Serial(port.device, 9600, timeout=1)
+                        s.write((cmd + '\n').encode('utf-8'))
+                        s.close()
+                        print(f"📤 [直接串口] 发送指令: {cmd} → {port.device}")
+                        return True
+                    except:
+                        continue
+    except Exception as e:
+        print(f"⚠️ 直接串口发送失败: {e}")
+    return False
+
 @app.route('/api/device/control', methods=['POST'])
 def api_device_control():
     """控制设备开关：更新数据库、缓存，并写入串口指令"""
@@ -1313,7 +1340,7 @@ def api_device_control():
     is_alarm = device in ('flame', 'human')
     
     try:
-        # 1. 更新数据库最新一条记录（仅普通设备）
+        # 1. 更新数据库最新一条记录
         if db_field and not is_alarm:
             conn = get_db_connection()
             if conn:
@@ -1325,6 +1352,22 @@ def api_device_control():
                 conn.commit()
                 cursor.close()
                 conn.close()
+        elif is_alarm:
+            # 警报设备也写入数据库，持久化状态
+            db_col = f'{device}_status'
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(f"""
+                        UPDATE sensor_data SET {db_col} = %s
+                        ORDER BY timestamp DESC LIMIT 1
+                    """, (is_on,))
+                    conn.commit()
+                except Exception:
+                    pass  # 旧表可能没有该列，忽略
+                cursor.close()
+                conn.close()
         
         # 2. 更新内存缓存
         if db_field:
@@ -1334,9 +1377,17 @@ def api_device_control():
         # 更新动作缓存（存储 'on'/'off'/'auto' 字符串）
         device_action_cache[device] = action
         
-        # 3. 写入串口指令文件（serial_to_db_fixed.py 会读取并发送）
-        with open(CMD_FILE, 'w') as f:
-            json.dump({'cmd': cmd, 'pending': True}, f)
+        # 3. 尝试直接通过串口发送指令（立即生效）
+        direct_ok = send_serial_command_direct(cmd)
+        if not direct_ok:
+            # 如果直接发送失败，写入命令文件（serial_to_db_fixed.py 会读取并发送）
+            with open(CMD_FILE, 'w') as f:
+                json.dump({'cmd': cmd, 'pending': True}, f)
+            print(f"📝 [命令文件] {cmd} → 已写入队列，等待 serial_to_db_fixed.py 发送")
+        else:
+            # 直接发送成功，清空命令文件避免重复发送
+            with open(CMD_FILE, 'w') as f:
+                json.dump({'cmd': '', 'pending': False}, f)
         
         print(f"[设备控制] {cmd} → 数据库+缓存已更新")
         return jsonify({'success': True, 'cmd': cmd, 'message': f'{device} 已{"开启" if is_on else "关闭"}'})

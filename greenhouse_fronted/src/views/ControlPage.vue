@@ -348,7 +348,12 @@ function toggleDevice(device) {
     .then(data => {
       if (data.success) {
         deviceStatus[device] = !current
-        deviceAutoMode[device] = false  // 手动操作退出自动模式
+        // 警报设备：auto 模式时标记为自动；普通设备：手动操作退出自动模式
+        if (isAlarm) {
+          deviceAutoMode[device] = (action === 'auto')
+        } else {
+          deviceAutoMode[device] = false
+        }
         const actionText = isAlarm ? (action === 'auto' ? '自动' : '关闭') : (action === 'on' ? '开启' : '关闭')
         addCmdLog('device', `${labelMap[device] || device} → ${actionText}`)
       } else {
@@ -357,6 +362,9 @@ function toggleDevice(device) {
     })
     .catch(() => {
       deviceStatus[device] = !current
+      if (isAlarm) {
+        deviceAutoMode[device] = (action === 'auto')
+      }
       const actionText = isAlarm ? (action === 'auto' ? '自动' : '关闭') : (action === 'on' ? '开启' : '关闭')
       addCmdLog('device', `${labelMap[device] || device} → ${actionText}`)
     })
