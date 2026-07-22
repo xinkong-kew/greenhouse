@@ -12,6 +12,9 @@ import serial.tools.list_ports
 import time
 import json
 import re
+import mysql.connector
+import math
+from datetime import datetime
 
 # ==================== 配置 ====================
 # ADP-L610 4G 模块（HTTP 通信）
@@ -70,6 +73,72 @@ THRESHOLD_CMD_MAP = {
     'water': 'SET_WATER',
     'co2': 'SET_CO2',
 }
+
+# ==================== 数据库配置（与 serial_to_db_fixed.py 一致） ====================
+DB_CONFIG = {
+    'host': 'localhost',
+    'port': 3306,
+    'user': 'root',
+    'password': 'hyqiuyu45',
+    'database': 'sensor_db',
+    'auth_plugin': 'mysql_native_password',
+    'use_pure': True,
+    'connect_timeout': 5
+}
+
+
+def connect_db():
+    """连接数据库"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        return conn
+    except Exception as e:
+        print(f"[数据库] 连接失败: {e}")
+        return None
+
+
+def ensure_table(conn):
+    """确保数据表存在"""
+    try:
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS sensor_data (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                temperature FLOAT,
+                humidity FLOAT,
+                soil_moisture FLOAT,
+                water_level FLOAT,
+                co2 INT,
+                flame_detected BOOLEAN DEFAULT FALSE,
+                pump_status BOOLEAN DEFAULT FALSE,
+                fan_status BOOLEAN DEFAULT FALSE,
+                motor_status BOOLEAN DEFAULT FALSE,
+                buzzer_status BOOLEAN DEFAULT FALSE
+            )
+        """)
+        conn.commit()
+        c.close()
+    except Exception as e:
+        print(f"[数据库] 建表失败: {e}")
+
+
+def insert_sensor_data(conn, temp, hum, soil, water, co2_val, flame, pump, fan, motor, buzzer):
+    """插入一条传感器数据到数据库"""
+    try:
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO sensor_data 
+            (timestamp, temperature, humidity, soil_moisture, water_level, co2,
+             flame_detected, pump_status, fan_status, motor_status, buzzer_status) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (datetime.now(), temp, hum, soil, water, co2_val, flame, pump, fan, motor, buzzer))
+        conn.commit()
+        c.close()
+        return True
+    except mysql.connector.Error as e:
+        print(f"[数据库] 写入失败: {e}")
+        return False
 
 
 def list_ports():
@@ -316,18 +385,27 @@ def sync_thresholds(ser_ctrl, server_commands):
 # ==================== 主循环 ====================
 
 def main():
-    print(f"🚀 ADP-L610 双向通信工具（真实传感器数据）")
+    print(f"🚀 ADP-L610 双向通信工具（真实传感器数据 + 数据库写入）")
     print(f"ADP-L610 (HTTP): {SERIAL_PORT_ADP} @ {BAUDRATE_ADP} baud")
     print(f"Arduino (传感器): {SERIAL_PORT_CTRL} @ {BAUDRATE_CTRL} baud")
+    print(f"数据库: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
     print(f"服务器: shijie-smartline.club:80/api/adp610/data")
     print(f"指令间隔: {CMD_INTERVAL}s | 循环间隔: {CYCLE_INTERVAL}s\n")
 
-    last_sensor_data = None  # 缓存上次传感器数据，读取失败时使用
+    last_sensor_data = None
 
     list_ports()
     print()
 
-    # 连接 ADP-L610
+    # ===== 连接数据库 =====
+    db_conn = connect_db()
+    if db_conn:
+        ensure_table(db_conn)
+        print("✅ 数据库连接成功\n")
+    else:
+        print("❌ 数据库连接失败，将跳过数据库写入\n")
+
+    # ===== 连接 ADP-L610 =====
     ser_adp = None
     while ser_adp is None:
         try:
@@ -340,7 +418,7 @@ def main():
             print(f"❌ {SERIAL_PORT_ADP} 连接失败: {e}")
             time.sleep(5)
 
-    # 连接 Arduino
+    # ===== 连接 Arduino =====
     ser_ctrl = None
     while ser_ctrl is None:
         try:
@@ -348,7 +426,6 @@ def main():
                 port=SERIAL_PORT_CTRL, baudrate=BAUDRATE_CTRL,
                 timeout=1, write_timeout=1
             )
-            # 清空缓冲区，丢弃启动打印信息
             time.sleep(2)
             ser_ctrl.reset_input_buffer()
             print(f"✅ Arduino 已连接: {SERIAL_PORT_CTRL}\n")
@@ -369,7 +446,46 @@ def main():
             if sensor_data:
                 last_sensor_data = sensor_data
             else:
-                sensor_data = last_sensor_data  # 用缓存数据
+                sensor_data = last_sensor_data
+
+            if sensor_data:
+                # ===== 写入数据库 =====
+                if db_conn:
+                    ok = insert_sensor_data(
+                        db_conn,
+                        sensor_data.get('temp', 0),
+                        sensor_data.get('hum', 0),
+                        sensor_data.get('soil', 0),
+                        sensor_data.get('water', 0),
+                        sensor_data.get('co2', 0),
+                        sensor_data.get('flame', 0),
+                        1 if CURRENT_DEVICE_STATE.get('pump') else 0,
+                        1 if CURRENT_DEVICE_STATE.get('fan') else 0,
+                        1 if CURRENT_DEVICE_STATE.get('motor') else 0,
+                        0,  # buzzer 始终为 0
+                    )
+                    if not ok:
+                        print("⚠️ 数据库写入失败，尝试重连...")
+                        try:
+                            db_conn.close()
+                        except:
+                            pass
+                        time.sleep(1)
+                        db_conn = connect_db()
+                        if db_conn:
+                            insert_sensor_data(
+                                db_conn,
+                                sensor_data.get('temp', 0),
+                                sensor_data.get('hum', 0),
+                                sensor_data.get('soil', 0),
+                                sensor_data.get('water', 0),
+                                sensor_data.get('co2', 0),
+                                sensor_data.get('flame', 0),
+                                1 if CURRENT_DEVICE_STATE.get('pump') else 0,
+                                1 if CURRENT_DEVICE_STATE.get('fan') else 0,
+                                1 if CURRENT_DEVICE_STATE.get('motor') else 0,
+                                0,
+                            )
 
             # ===== 第二步：POST 发送传感器数据到服务器 =====
             execute_post_sequence(ser_adp, sensor_data)
@@ -409,6 +525,12 @@ def main():
         if ser_ctrl and ser_ctrl.is_open:
             ser_ctrl.close()
             print("🔌 Arduino 串口已关闭")
+        if db_conn:
+            try:
+                db_conn.close()
+                print("🔌 数据库连接已关闭")
+            except:
+                pass
 
 
 if __name__ == '__main__':

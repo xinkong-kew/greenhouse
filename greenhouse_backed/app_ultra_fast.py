@@ -1468,22 +1468,19 @@ def api_adp610_health():
 def api_device_commands():
     """获取当前控制命令状态（开发板轮询用）
     
-    开发板通过 GET 请求获取最新的设备状态和阈值指令，
-    从数据库读取最新记录，返回 JSON 格式。
+    设备状态从内存缓存读取（前端修改后立即更新，不会被新数据覆盖）
+    传感器数据从数据库读取最新记录
+    阈值从数据库读取（缓存后备）
     """
-    db_status = {'pump_status': False, 'fan_status': False,
-                 'motor_status': False, 'buzzer_status': False,
-                 'flame_detected': False}
-    db_threshold = {}
     db_sensor = {}
+    db_threshold = {}
 
     conn = get_db_connection()
     if conn:
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                SELECT temperature, humidity, soil_moisture, water_level, co2,
-                       pump_status, fan_status, motor_status, buzzer_status, flame_detected
+                SELECT temperature, humidity, soil_moisture, water_level, co2
                 FROM sensor_data
                 ORDER BY timestamp DESC
                 LIMIT 1
@@ -1497,14 +1494,7 @@ def api_device_commands():
                     'water_level': float(row[3]) if row[3] is not None else None,
                     'co2': int(row[4]) if row[4] is not None else None,
                 }
-                db_status = {
-                    'pump_status': bool(row[5]),
-                    'fan_status': bool(row[6]),
-                    'motor_status': bool(row[7]),
-                    'buzzer_status': bool(row[8]),
-                    'flame_detected': bool(row[9]),
-                }
-            # 同时读取阈值
+            # 读取阈值
             cursor.execute(f"SELECT config_key, config_value FROM {THRESHOLD_TABLE}")
             for row in cursor.fetchall():
                 db_threshold[row[0]] = row[1]
@@ -1522,11 +1512,12 @@ def api_device_commands():
             'water_level': db_sensor.get('water_level'),
             'co2': db_sensor.get('co2'),
         },
+        # 设备状态从内存缓存读取（前端控制实时更新，不受数据库覆盖影响）
         'device': {
-            'pump': db_status['pump_status'],
-            'fan': db_status['fan_status'],
-            'motor': db_status['motor_status'],
-            'buzzer': db_status['buzzer_status'],
+            'pump': device_status_cache.get('pump_status', False),
+            'fan': device_status_cache.get('fan_status', False),
+            'motor': device_status_cache.get('motor_status', False),
+            'buzzer': device_status_cache.get('buzzer_status', False),
             'flame': device_status_cache.get('flame_status', True),
             'human': device_status_cache.get('human_status', True),
         },
