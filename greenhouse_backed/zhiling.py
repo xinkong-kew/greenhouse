@@ -28,12 +28,12 @@ BAUDRATE_CTRL = 9600
 CMD_INTERVAL = 0.5      # 每条指令间隔（秒）
 CYCLE_INTERVAL = 3       # 每轮执行间隔（秒）
 LINE_ENDING = '\r\n'    # AT 指令换行符
-SENSOR_READ_TIMEOUT = 3  # 读取传感器超时（秒）
+SENSOR_READ_TIMEOUT = 6  # 读取传感器超时（秒）
 
 # ==================== 串口数据正则 ====================
 # Arduino 输出格式（带 [#] 前缀或不带均可）
 SERIAL_PATTERN = re.compile(
-    r'土壤=(\d+)\s+CO2=(\d+)\s+人体=(\d)\s+火焰=(\d)\s+'
+    r'土壤=(\d+)%\s+CO2=(\d+)\s+人体=(\d)\s+火焰=(\d)\s+'
     r'水位=([\d.]+)%\s+距离=(-?[\d.]+)cm\s+'
     r'温度=([\d.]+)℃\s+湿度=([\d.]+)%'
 )
@@ -206,51 +206,55 @@ def parse_httpread_response(response):
 
 def read_sensor_line(ser_ctrl):
     """从 Arduino 串口读取一行传感器数据，返回解析后的字典"""
+    # 先清空旧缓冲，避免读到过期数据
+    ser_ctrl.reset_input_buffer()
     deadline = time.time() + SENSOR_READ_TIMEOUT
     while time.time() < deadline:
-        if ser_ctrl.in_waiting:
+        try:
             raw = ser_ctrl.readline()
-            if not raw:
-                time.sleep(0.1)
-                continue
-            line = raw.decode('utf-8', errors='ignore').strip()
-            if not line:
-                continue
-            # 尝试匹配传感器数据
-            m = SERIAL_PATTERN.search(line)
-            if m:
-                soil_raw = int(m.group(1))
-                co2_raw = int(m.group(2))
-                human_level = int(m.group(3))
-                flame_level = int(m.group(4))
-                water_percent = float(m.group(5))
-                distance = float(m.group(6))
-                temperature = float(m.group(7))
-                humidity = float(m.group(8))
+        except serial.SerialException:
+            break
+        if not raw:
+            continue
+        line = raw.decode('utf-8', errors='ignore').strip()
+        if not line:
+            continue
+        # 尝试匹配传感器数据
+        m = SERIAL_PATTERN.search(line)
+        if m:
+            soil_raw = int(m.group(1))
+            co2_raw = int(m.group(2))
+            human_level = int(m.group(3))
+            flame_level = int(m.group(4))
+            water_percent = float(m.group(5))
+            distance = float(m.group(6))
+            temperature = float(m.group(7))
+            humidity = float(m.group(8))
 
-                # 土壤原始值转百分比
-                soil_percent = round(soil_raw / 1023.0 * 100, 1)
-                soil_percent = max(0, min(100, soil_percent))
+            # 土壤原始值转百分比
+            soil_percent = round(soil_raw / 1023.0 * 100, 1)
+            soil_percent = max(0, min(100, soil_percent))
 
-                # 火焰：level==0 表示检测到火焰
-                flame_detected = 1 if (flame_level == 0) else 0
+            # 火焰：level==0 表示检测到火焰
+            flame_detected = 1 if (flame_level == 0) else 0
 
-                print(f"  [传感器] 温度={temperature:.1f}℃ 湿度={humidity:.1f}% "
-                      f"土壤={soil_percent:.1f}% 水位={water_percent:.1f}% "
-                      f"CO2={co2_raw} 火焰={flame_detected} 人体={human_level}")
+            print(f"  [传感器] 温度={temperature:.1f}℃ 湿度={humidity:.1f}% "
+                  f"土壤={soil_percent:.1f}% 水位={water_percent:.1f}% "
+                  f"CO2={co2_raw} 火焰={flame_detected} 人体={human_level}")
 
-                return {
-                    'temp': round(temperature, 1),
-                    'hum': round(humidity, 1),
-                    'soil': soil_percent,
-                    'co2': co2_raw,
-                    'flame': flame_detected,
-                    'human': human_level,
-                    'water': round(water_percent, 1),
-                    'distance': round(distance, 1),
-                }
+            return {
+                'temp': round(temperature, 1),
+                'hum': round(humidity, 1),
+                'soil': soil_percent,
+                'co2': co2_raw,
+                'flame': flame_detected,
+                'human': human_level,
+                'water': round(water_percent, 1),
+                'distance': round(distance, 1),
+            }
         else:
-            time.sleep(0.2)
+            # 非传感器行（如阈值汇总），打印出来便于调试
+            print(f"  [Arduino输出] {line}")
     print("  ⚠️ 读取传感器超时，使用上次数据")
     return None
 
@@ -328,6 +332,7 @@ def execute_post_sequence(ser_adp, sensor_data):
         'temp': sensor_data.get('temp', 0),
         'hum': sensor_data.get('hum', 0),
         'soil': sensor_data.get('soil', 0),
+        'water': sensor_data.get('water', 0),
         'co2': sensor_data.get('co2', 0),
         'flame': sensor_data.get('flame', 0),
         'pump': 1 if CURRENT_DEVICE_STATE.get('pump') else 0,

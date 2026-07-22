@@ -533,8 +533,18 @@ def fast_sensor_monitor():
             sensor_data = get_sensor_data_only()
             
             if sensor_data and sensor_data['timestamp'] != last_timestamp:
+                # 将 latest_* 键名转为前端期望的键名
+                frontend_data = {
+                    'temperature': sensor_data.get('latest_temp'),
+                    'humidity': sensor_data.get('latest_hum'),
+                    'soil_moisture': sensor_data.get('latest_soil'),
+                    'water_level': sensor_data.get('latest_water'),
+                    'co2': sensor_data.get('latest_co2'),
+                    'timestamp': sensor_data.get('timestamp'),
+                }
+                
                 # 合并设备状态
-                combined_data = {**sensor_data, **device_status_cache}
+                combined_data = {**frontend_data, **device_status_cache}
                 
                 # 更新缓存
                 latest_cache['data'] = combined_data
@@ -543,7 +553,7 @@ def fast_sensor_monitor():
                 
                 # 推送传感器数据
                 try:
-                    socketio.emit('sensor_data_update', sensor_data)
+                    socketio.emit('sensor_data_update', frontend_data)
                 except:
                     pass
                 

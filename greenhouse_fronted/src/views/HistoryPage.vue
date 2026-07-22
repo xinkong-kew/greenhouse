@@ -87,8 +87,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import Chart from 'chart.js/auto'
+import socket from '../utils/socket.js'
 
 const chartCanvas = ref(null)
 let chartInstance = null
@@ -160,18 +161,7 @@ async function fetchHistory() {
 }
 
 async function refreshTable() {
-  try {
-    const res = await fetch(`/api/history?range=${rangeType.value}`)
-    const json = await res.json()
-    if (json.success) {
-      const raw = json.records || []
-      raw.sort((a, b) => new Date(b.ts) - new Date(a.ts))
-      records.value = raw
-      totalRecords.value = json.total_records || 0
-    }
-  } catch {
-    // 静默
-  }
+  await fetchHistory()
 }
 
 function renderChart(chart, stats) {
@@ -293,10 +283,33 @@ function switchSensor(key) {
   })
 }
 
+// 自动刷新防抖：5秒内只刷新一次
+let autoRefreshTimer = null
+
+function onNewSensorData() {
+  if (autoRefreshTimer) return
+  autoRefreshTimer = setTimeout(() => {
+    autoRefreshTimer = null
+    fetchHistory()
+  }, 2000)
+}
+
 onMounted(() => {
   nextTick(() => {
     fetchHistory()
   })
+  // 监听新数据事件，自动刷新
+  socket.on('realtime_update', onNewSensorData)
+  socket.on('data_update', onNewSensorData)
+})
+
+onUnmounted(() => {
+  socket.off('realtime_update', onNewSensorData)
+  socket.off('data_update', onNewSensorData)
+  if (autoRefreshTimer) {
+    clearTimeout(autoRefreshTimer)
+    autoRefreshTimer = null
+  }
 })
 </script>
 
