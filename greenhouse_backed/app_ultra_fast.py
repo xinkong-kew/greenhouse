@@ -552,8 +552,19 @@ def fast_sensor_monitor():
                     'timestamp': sensor_data.get('timestamp'),
                 }
                 
-                # 合并设备状态
-                combined_data = {**frontend_data, **device_status_cache}
+                # 从数据库读取设备状态（真实状态，非缓存）
+                device_status_data, _ = get_device_status_only()
+                
+                # 合并数据：优先使用数据库中的真实状态，缓存做后备
+                combined_data = {**device_status_cache, **frontend_data}
+                if device_status_data:
+                    for key in ['pump_status', 'fan_status', 'motor_status', 'buzzer_status', 'flame_detected']:
+                        if key in device_status_data:
+                            combined_data[key] = device_status_data[key]
+                if sensor_data.get('flame_status') is not None:
+                    combined_data['flame_status'] = sensor_data['flame_status']
+                if sensor_data.get('human_status') is not None:
+                    combined_data['human_status'] = sensor_data['human_status']
                 
                 # 更新缓存
                 latest_cache['data'] = combined_data
@@ -620,11 +631,16 @@ def handle_connect():
     
     # 发送传感器数据
     sensor_data = get_sensor_data_only()
+    status, _ = get_device_status_only()
     if sensor_data:
         emit('sensor_data_update', sensor_data)
         
-        # 合并数据
-        combined_data = {**sensor_data, **device_status_cache}
+        # 合并数据：优先使用数据库真实状态
+        combined_data = {**device_status_cache, **sensor_data}
+        if status:
+            for key in ['pump_status', 'fan_status', 'motor_status', 'buzzer_status', 'flame_detected']:
+                if key in status:
+                    combined_data[key] = status[key]
         emit('realtime_update', combined_data)
         emit('data_update', combined_data)  # 兼容
     

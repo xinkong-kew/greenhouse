@@ -484,6 +484,8 @@ function handleRealtimeUpdate(data) {
   if (data.pump_status != null) deviceStatus.pump = data.pump_status
   if (data.fan_status != null) deviceStatus.fan = data.fan_status
   if (data.motor_status != null) deviceStatus.motor = data.motor_status
+  if (data.flame_status != null) deviceStatus.flame = data.flame_status
+  if (data.human_status != null) deviceStatus.human = data.human_status
 }
 
 onMounted(() => {

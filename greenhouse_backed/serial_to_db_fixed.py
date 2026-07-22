@@ -14,13 +14,14 @@ import os
 CMD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'serial_cmd.json')
 
 # 设备状态内存缓存（由 send_cmd 解析指令更新）
+# 注意：初始值必须与 Arduino 代码一致（flameBeepMode = BEEP_AUTO, humanBeepMode = BEEP_AUTO）
 DEVICE_STATES = {
     'pump': False,
     'fan': False,
     'motor': False,
     'buzzer': False,
-    'flame': False,   # False=关闭, True=自动
-    'human': False    # False=关闭, True=自动
+    'flame': True,    # True=自动（与 Arduino 的 BEEP_AUTO 一致）
+    'human': True     # True=自动（与 Arduino 的 BEEP_AUTO 一致）
 }
 
 # 设备名到数据库字段名的映射
