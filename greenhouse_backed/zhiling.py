@@ -25,10 +25,10 @@ BAUDRATE_ADP = 115200
 SERIAL_PORT_CTRL = 'COM28'
 BAUDRATE_CTRL = 9600
 
-CMD_INTERVAL = 0.5      # 每条指令间隔（秒）
-CYCLE_INTERVAL = 3       # 每轮执行间隔（秒）
+CMD_INTERVAL = 0.2      # 每条指令间隔（秒）
+CYCLE_INTERVAL = 1       # 每轮执行间隔（秒）
 LINE_ENDING = '\r\n'    # AT 指令换行符
-SENSOR_READ_TIMEOUT = 6  # 读取传感器超时（秒）
+SENSOR_READ_TIMEOUT = 4  # 读取传感器超时（秒）
 
 # ==================== 串口数据正则 ====================
 # Arduino 输出格式（带 [#] 前缀或不带均可）

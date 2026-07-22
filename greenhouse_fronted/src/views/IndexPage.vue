@@ -154,12 +154,31 @@
         </div>
       </div>
 
-      <!-- 作品线稿图（预留区域） -->
+      <!-- 作品线稿图 -->
       <div class="glow-card sketch-card">
         <div class="glow-card-title">🎨 作品线稿</div>
-        <div class="sketch-placeholder">
-          <span class="sketch-icon">🖼️</span>
-          <span class="sketch-text">线稿图预留区域，待上传</span>
+        <div class="sketch-grid">
+          <div class="sketch-item">
+            <div class="sketch-label">正视图</div>
+            <div class="sketch-image-wrapper" @click="openLightbox('/sketch.jpg', '正视图')">
+              <img src="/sketch.jpg" alt="正视图" class="sketch-image" />
+            </div>
+          </div>
+          <div class="sketch-item">
+            <div class="sketch-label">俯视图</div>
+            <div class="sketch-image-wrapper" @click="openLightbox('/topview.jpg', '俯视图')">
+              <img src="/topview.jpg" alt="俯视图" class="sketch-image" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 图片查看器 -->
+      <div v-if="lightboxVisible" class="lightbox-overlay" @click.self="closeLightbox">
+        <div class="lightbox-content">
+          <button class="lightbox-close" @click="closeLightbox">&times;</button>
+          <img :src="lightboxSrc" :alt="lightboxAlt" class="lightbox-image" />
+          <div class="lightbox-label">{{ lightboxAlt }}</div>
         </div>
       </div>
 
@@ -306,6 +325,21 @@ const weather = reactive({
 })
 const forecastList = ref([])
 const showCityMap = ref(false)
+
+// ===== 图片查看器 =====
+const lightboxVisible = ref(false)
+const lightboxSrc = ref('')
+const lightboxAlt = ref('')
+
+function openLightbox(src, alt) {
+  lightboxSrc.value = src
+  lightboxAlt.value = alt
+  lightboxVisible.value = true
+}
+
+function closeLightbox() {
+  lightboxVisible.value = false
+}
 
 async function onCitySelect({ province, city, cityEn }) {
   showCityMap.value = false
@@ -739,6 +773,10 @@ function getWeatherIcon(code) {
   return '☁️'
 }
 
+function onKeydown(e) {
+  if (e.key === 'Escape') closeLightbox()
+}
+
 onMounted(async () => {
   socket.on('realtime_update', handleRealtimeUpdate)
   socket.on('weather_update', handleWeatherUpdate)
@@ -766,6 +804,8 @@ onMounted(async () => {
   // 当 Socket.IO 连接不可用时（如 Nginx 未代理 /socket.io/），此机制确保数据仍能显示
   fetchWeatherAgentData()
   weatherPollTimer = setInterval(fetchWeatherAgentData, 15000)
+
+  document.addEventListener('keydown', onKeydown)
 })
 
 onUnmounted(() => {
@@ -776,6 +816,7 @@ onUnmounted(() => {
     clearInterval(weatherPollTimer)
     weatherPollTimer = null
   }
+  document.removeEventListener('keydown', onKeydown)
 })
 </script>
 
@@ -1175,29 +1216,117 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-.sketch-placeholder {
+.sketch-grid {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+}
+
+.sketch-item {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+.sketch-label {
+  text-align: center;
+  font-size: 13px;
+  color: rgba(0, 255, 136, 0.8);
+  margin-bottom: 6px;
+  font-weight: 500;
+  letter-spacing: 2px;
+}
+
+.sketch-image-wrapper {
+  flex: 1;
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 20px;
-  border: 2px dashed rgba(0, 255, 136, 0.15);
+  overflow: hidden;
   border-radius: 8px;
   background: rgba(0, 255, 136, 0.02);
+  border: 1px solid rgba(0, 255, 136, 0.08);
   min-height: 80px;
 }
 
-.sketch-icon {
-  font-size: 32px;
-  opacity: 0.5;
+.sketch-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  transition: transform 0.3s ease;
 }
 
-.sketch-text {
-  font-size: 13px;
-  color: rgba(200, 214, 229, 0.3);
-  letter-spacing: 1px;
+.sketch-image:hover {
+  transform: scale(1.02);
+}
+
+.sketch-image-wrapper {
+  cursor: pointer;
+}
+
+/* ===== 图片查看器（Lightbox） ===== */
+.lightbox-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.2s ease;
+}
+
+.lightbox-content {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.lightbox-close {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 32px;
+  cursor: pointer;
+  line-height: 1;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.lightbox-close:hover {
+  opacity: 1;
+}
+
+.lightbox-image {
+  max-width: 90vw;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+}
+
+.lightbox-label {
+  margin-top: 12px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+  letter-spacing: 2px;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* 内联预测结果 */
@@ -1647,16 +1776,21 @@ onUnmounted(() => {
   min-height: 80px;
 }
 
-.mobile-mode .sketch-placeholder {
-  min-height: 50px;
-  padding: 12px;
+.mobile-mode .sketch-grid {
+  gap: 8px;
 }
 
-.mobile-mode .sketch-icon {
-  font-size: 24px;
+.mobile-mode .sketch-item {
+  min-height: 0;
 }
 
-.mobile-mode .sketch-text {
+.mobile-mode .sketch-label {
   font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.mobile-mode .sketch-image-wrapper {
+  min-height: 50px;
+  padding: 4px;
 }
 </style>

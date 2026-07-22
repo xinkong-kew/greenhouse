@@ -2,7 +2,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 import IndexPage from '../views/IndexPage.vue'
 import ControlPage from '../views/ControlPage.vue'
 import HistoryPage from '../views/HistoryPage.vue'
-
 const routes = [
   {
     path: '/',

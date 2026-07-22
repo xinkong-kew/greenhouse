@@ -39,6 +39,9 @@ DASHSCOPE_MODEL = os.getenv('DASHSCOPE_MODEL', 'deepseek-v4-flash')
 # 服务端口
 SERVER_PORT = int(os.getenv('SERVER_PORT', '5000'))
 
+# 后端图片目录
+BACKEND_IMAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'image')
+
 # ==================== 应用实例 ====================
 # 前端构建输出目录
 FRONTEND_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'greenhouse_fronted', 'dist')
@@ -677,6 +680,30 @@ def handle_request_weather():
 @socketio.on('disconnect')
 def handle_disconnect():
     print('Client disconnected')
+
+@app.route('/sketch.jpg')
+def serve_sketch():
+    """提供正视图图片"""
+    from flask import send_from_directory
+    return send_from_directory(BACKEND_IMAGE_DIR, '9af14f0c83b95eb0dd53b7e03aa9d4e2.jpg')
+
+@app.route('/favicon.svg')
+def serve_favicon():
+    """提供favicon"""
+    from flask import send_from_directory
+    return send_from_directory(FRONTEND_DIST, 'favicon.svg')
+
+@app.route('/topview.jpg')
+def serve_topview():
+    """提供俯视图图片"""
+    from flask import send_from_directory
+    return send_from_directory(BACKEND_IMAGE_DIR, '85b3b531d09233b253bfd207caee1ca4.jpg')
+
+@app.route('/greenhouse_model.glb')
+def serve_model():
+    """提供3D模型"""
+    from flask import send_from_directory
+    return send_from_directory(FRONTEND_DIST, 'greenhouse_model.glb')
 
 @app.route('/')
 def index():
