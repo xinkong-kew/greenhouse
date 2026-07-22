@@ -764,6 +764,22 @@ def ai_chat():
                 'response': '很抱歉，AI助手目前不可用。请检查阿里云百炼 API Key 和网络连接，或稍后再试。'
             })
         
+        # 从数据库获取实时传感器数据
+        sensor_data = get_sensor_data_only()
+        device_status, _ = get_device_status_only()
+        
+        # 构建传感器上下文（覆盖前端传入的 context）
+        context = {
+            'temperature': sensor_data.get('latest_temp', 0) if sensor_data else 0,
+            'humidity': sensor_data.get('latest_hum', 0) if sensor_data else 0,
+            'soil_moisture': sensor_data.get('latest_soil', 0) if sensor_data else 0,
+            'water_level': sensor_data.get('latest_water', 0) if sensor_data else 0,
+            'pump_status': device_status.get('pump_status', False) if device_status else False,
+            'fan_status': device_status.get('fan_status', False) if device_status else False,
+            'motor_status': device_status.get('motor_status', False) if device_status else False,
+            'flame_detected': device_status.get('flame_detected', False) if device_status else False,
+        }
+        
         # 生成AI响应
         ai_response = generate_ai_response(user_message, context)
         
