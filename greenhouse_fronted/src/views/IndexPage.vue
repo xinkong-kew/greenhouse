@@ -489,7 +489,7 @@ function renderCharts() {
             borderWidth: 1.5
           },
           {
-            label: '水位 (cm)',
+            label: '水位 (%)',
             data: hasData ? data.water_levels : [],
             borderColor: '#1abc9c',
             backgroundColor: 'rgba(26, 188, 156, 0.2)',

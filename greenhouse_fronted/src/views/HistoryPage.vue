@@ -58,7 +58,7 @@
                 <th>🌡️ 温度 (°C)</th>
                 <th>💧 湿度 (%)</th>
                 <th>🌱 土壤湿度 (%)</th>
-                <th>💦 水位 (cm)</th>
+                <th>💦 水位 (%)</th>
                 <th>🫁 CO2 (ppm)</th>
               </tr>
             </thead>
@@ -103,7 +103,7 @@ const sensorOptions = [
   { key: 'temperature', label: '温度', icon: '🌡️', unit: '°C', color: '#e74c3c' },
   { key: 'humidity', label: '湿度', icon: '💧', unit: '%', color: '#3498db' },
   { key: 'soil_moisture', label: '土壤湿度', icon: '🌱', unit: '%', color: '#f39c12' },
-  { key: 'water_level', label: '水位', icon: '💦', unit: 'cm', color: '#1abc9c' },
+  { key: 'water_level', label: '水位', icon: '💦', unit: '%', color: '#1abc9c' },
   { key: 'co2', label: 'CO2', icon: '🫁', unit: 'ppm', color: '#9b59b6' }
 ]
 

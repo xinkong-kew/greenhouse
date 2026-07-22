@@ -217,7 +217,7 @@ const thresholdList = [
   { key: 'temp', label: '温度', icon: '🌡️', unit: '°C', min: 0, max: 60, step: 0.5, default: 25 },
   { key: 'humidity', label: '湿度', icon: '💧', unit: '%', min: 0, max: 100, step: 1, default: 60 },
   { key: 'soil', label: '土壤湿度', icon: '🌱', unit: '%', min: 0, max: 100, step: 1, default: 50 },
-  { key: 'water', label: '水位', icon: '💦', unit: 'cm', min: 0, max: 50, step: 0.5, default: 20 },
+  { key: 'water', label: '水位', icon: '💦', unit: '%', min: 0, max: 100, step: 1, default: 20 },
   { key: 'co2', label: 'CO2 浓度', icon: '🫁', unit: 'ppm', min: 0, max: 2000, step: 10, default: 400 }
 ]
 

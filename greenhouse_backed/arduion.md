@@ -29,7 +29,7 @@ float tempLimit = 40.0;
 int co2WarningThreshold = 700;
 const int waterTotalLength = 14;
 const unsigned int warmDelay = 2000;
-int soilThreshold = 350;
+int soilThreshold = 34;    // 0~100（百分比）
 bool pumpManual = false;
 float humiLimit = 70.0;
 int waterLowThreshold = 20;
@@ -43,7 +43,7 @@ bool fanManualOverride = false;
 unsigned long loopCount = 0;
 
 Servo myServo;
-bool servoAutoMode = true;        // true=自动（CO₂控制），false=手动
+bool servoAutoMode = false;       // 默认手动模式，发送 SERVO_AUTO 后开启自动
 int lastServoAngle = -1;
 
 U8X8_SSD1306_128X64_NONAME_SW_I2C u8x8(A5, A4, U8X8_PIN_NONE);
@@ -58,7 +58,7 @@ void updateDisplay(float temp, float humi, int soil, int co2, float water) {
   u8x8.setCursor(0, 1);
   u8x8.print("Humi:"); u8x8.print(humi, 1); u8x8.print("%");
   u8x8.setCursor(0, 2);
-  u8x8.print("Soil:"); u8x8.print(soil);
+  u8x8.print("Soil:"); u8x8.print(soil); u8x8.print("%");
   u8x8.setCursor(0, 3);
   u8x8.print("CO2:"); u8x8.print(co2);
   u8x8.setCursor(0, 4);
@@ -71,7 +71,7 @@ void updateDisplay(float temp, float humi, int soil, int co2, float water) {
 void printThresholdSummary() {
   Serial.print(F("阈值汇总: 温度=")); Serial.print(tempLimit,1); Serial.print(F("C"));
   Serial.print(F(" 湿度=")); Serial.print(humiLimit,1); Serial.print(F("%"));
-  Serial.print(F(" 土壤=")); Serial.print(soilThreshold);
+  Serial.print(F(" 土壤=")); Serial.print(soilThreshold); Serial.print(F("%"));
   Serial.print(F(" CO2=")); Serial.print(co2WarningThreshold);
   Serial.print(F(" 水位=")); Serial.print(waterLowThreshold); Serial.print(F("%"));
   Serial.print(F(" 风扇=")); Serial.print(fanManualOverride ? "手动" : "自动");
@@ -137,8 +137,7 @@ void setup() {
   Serial.println(F("水位指令：GET_WATER  SET_WATER 数值"));
   Serial.println(F("土壤阈值：GET_SOIL   SET_SOIL 数值"));
   Serial.println(F("空气湿度：GET_HUMI   SET_HUMI 数值"));
-  Serial.println(F("舵机模式：SERVO_AUTO（自动CO₂控制） SERVO_MANUAL（手动）"));
-  Serial.println(F("手动指令：SERVO_0  SERVO_90  SERVO_180  SERVO_角度值"));
+  Serial.println(F("舵机模式：SERVO_AUTO（自动CO₂控制） SERVO_0 SERVO_90 SERVO_180 SERVO_角度值"));
   Serial.println(F("提示：阈值汇总将在每秒自动打印"));
   Serial.println();
 
@@ -271,18 +270,18 @@ void loop() {
     // ----- 土壤阈值 -----
     else if (raw == "GET_SOIL") {
       Serial.print(F("-> 当前土壤自动浇水阈值："));
-      Serial.println(soilThreshold);
+      Serial.print(soilThreshold); Serial.println(F(" %"));
     }
     else if (raw.startsWith("SET_SOIL ")) {
       String valStr = raw.substring(9);
       valStr.trim();
       int newSoilTh = valStr.toInt();
-      if(newSoilTh >= 0 && newSoilTh <= 1023) {
+      if(newSoilTh >= 0 && newSoilTh <= 100) {
         soilThreshold = newSoilTh;
         Serial.print(F("-> 土壤浇水阈值修改为："));
-        Serial.println(soilThreshold);
+        Serial.print(soilThreshold); Serial.println(F(" %"));
       } else {
-        Serial.println(F("-> 土壤阈值合法范围：0~1023"));
+        Serial.println(F("-> 土壤阈值合法范围：0~100"));
       }
     }
     // ----- 空气湿度阈值 -----
@@ -305,53 +304,33 @@ void loop() {
     // ========== 舵机控制 ==========
     else if (raw == "SERVO_AUTO") {
       servoAutoMode = true;
-      Serial.println(F("-> 舵机切换为自动模式（CO₂控制）"));
-    }
-    else if (raw == "SERVO_MANUAL") {
-      servoAutoMode = false;
-      Serial.println(F("-> 舵机切换为手动模式"));
+      Serial.println(F("-> 舵机自动CO₂控制模式"));
     }
     else if (raw == "SERVO_0") {
-      if (!servoAutoMode) {
-        myServo.write(0);
-        lastServoAngle = 0;
-        Serial.println(F("-> 舵机转到 0°"));
-      } else {
-        Serial.println(F("-> 当前为自动模式，请先切换至手动"));
-      }
+      myServo.write(0);
+      lastServoAngle = 0;
+      Serial.println(F("-> 舵机转到 0°"));
     }
     else if (raw == "SERVO_90") {
-      if (!servoAutoMode) {
-        myServo.write(90);
-        lastServoAngle = 90;
-        Serial.println(F("-> 舵机转到 90°"));
-      } else {
-        Serial.println(F("-> 当前为自动模式，请先切换至手动"));
-      }
+      myServo.write(90);
+      lastServoAngle = 90;
+      Serial.println(F("-> 舵机转到 90°"));
     }
     else if (raw == "SERVO_180") {
-      if (!servoAutoMode) {
-        myServo.write(180);
-        lastServoAngle = 180;
-        Serial.println(F("-> 舵机转到 180°"));
-      } else {
-        Serial.println(F("-> 当前为自动模式，请先切换至手动"));
-      }
+      myServo.write(180);
+      lastServoAngle = 180;
+      Serial.println(F("-> 舵机转到 180°"));
     }
     else if (raw.startsWith("SERVO_")) {
-      if (!servoAutoMode) {
-        String valStr = raw.substring(6);
-        valStr.trim();
-        int angle = valStr.toInt();
-        if (angle >= 0 && angle <= 180) {
-          myServo.write(angle);
-          lastServoAngle = angle;
-          Serial.print(F("-> 舵机转到 ")); Serial.print(angle); Serial.println(F("°"));
-        } else {
-          Serial.println(F("-> 角度范围 0~180"));
-        }
+      String valStr = raw.substring(6);
+      valStr.trim();
+      int angle = valStr.toInt();
+      if (angle >= 0 && angle <= 180) {
+        myServo.write(angle);
+        lastServoAngle = angle;
+        Serial.print(F("-> 舵机转到 ")); Serial.print(angle); Serial.println(F("°"));
       } else {
-        Serial.println(F("-> 当前为自动模式，请先切换至手动"));
+        Serial.println(F("-> 角度范围 0~180"));
       }
     }
     else {
@@ -361,6 +340,7 @@ void loop() {
 
   // ---------- 读取传感器 ----------
   int soilValue = analogRead(SOIL_PIN);
+  int soilPercent = map(soilValue, 0, 1023, 0, 100);  // 转百分比
   int co2Raw = analogRead(CO2_PIN);
   int humanVal = digitalRead(HUMAN_SENSOR);
   int flameVal = digitalRead(FLAME_SENSOR);
@@ -390,7 +370,7 @@ void loop() {
   float temp = dht.readTemperature();
 
   // ---------- 串口打印传感器实时值（第一行，已删除“阈值”字段） ----------
-  Serial.print(F("土壤=")); Serial.print(soilValue);
+  Serial.print(F("土壤=")); Serial.print(soilPercent); Serial.print(F("%"));
   Serial.print(F(" CO2=")); Serial.print(co2Raw);
   Serial.print(F(" 人体=")); Serial.print(humanVal);
   Serial.print(F(" 火焰=")); Serial.print(flameVal);
@@ -444,7 +424,7 @@ void loop() {
 
   // ---------- 水泵自动控制 ----------
   if (!pumpManual) {
-    digitalWrite(PUMP_RELAY, (soilValue < soilThreshold) ? HIGH : LOW);
+    digitalWrite(PUMP_RELAY, (soilPercent < soilThreshold) ? HIGH : LOW);
   }
 
   // ========== 舵机自动控制（CO₂） ==========
@@ -458,7 +438,7 @@ void loop() {
   }
 
   // ---------- 刷新 OLED ----------
-  updateDisplay(temp, humidity, soilValue, co2Raw, waterPercent);
+  updateDisplay(temp, humidity, soilPercent, co2Raw, waterPercent);
 
   delay(1000);
 }

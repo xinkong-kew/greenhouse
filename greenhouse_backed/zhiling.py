@@ -60,7 +60,7 @@ CURRENT_THRESHOLDS = {
 DEVICE_CMD_MAP = {
     'pump':   {'on': '1',           'off': '0',        'auto': 'auto'},
     'fan':    {'on': 'FAN_ON',      'off': 'FAN_OFF',   'auto': 'FAN_AUTO'},
-    'motor':  {'on': 'SERVO_AUTO',  'off': 'SERVO_MANUAL', 'auto': 'SERVO_AUTO'},
+    'motor':  {'on': 'SERVO_180',  'off': 'SERVO_0', 'auto': 'SERVO_AUTO'},
     'flame':  {'on': 'FLAME_ON',    'off': 'FLAME_OFF', 'auto': 'FLAME_AUTO'},
     'human':  {'on': 'HUMAN_ON',    'off': 'HUMAN_OFF', 'auto': 'HUMAN_AUTO'},
 }
