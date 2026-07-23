@@ -77,6 +77,14 @@ void printThresholdSummary() {
   Serial.print(F(" 风扇=")); Serial.print(fanManualOverride ? "手动" : "自动");
   Serial.print(F(" 水泵=")); Serial.print(pumpManual ? "手动" : "自动");
   Serial.print(F(" 舵机=")); Serial.print(servoAutoMode ? "自动" : "手动");
+  Serial.print(F(" 火焰="));
+  if (flameBeepMode == BEEP_AUTO) Serial.print("自动");
+  else if (flameBeepMode == BEEP_ON) Serial.print("开启");
+  else Serial.print("关闭");
+  Serial.print(F(" 人体="));
+  if (humanBeepMode == BEEP_AUTO) Serial.print("自动");
+  else if (humanBeepMode == BEEP_ON) Serial.print("开启");
+  else Serial.print("关闭");
   Serial.println();
 }
 

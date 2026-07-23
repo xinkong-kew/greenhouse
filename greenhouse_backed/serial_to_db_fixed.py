@@ -20,8 +20,8 @@ DEVICE_STATES = {
     'fan': False,
     'motor': False,
     'buzzer': False,
-    'flame': True,    # True=自动（与 Arduino 的 BEEP_AUTO 一致）
-    'human': True     # True=自动（与 Arduino 的 BEEP_AUTO 一致）
+    'flame': False,    # 默认关闭
+    'human': False     # 默认关闭
 }
 
 # 设备名到数据库字段名的映射
@@ -52,6 +52,11 @@ SERIAL_PATTERN = re.compile(
     r'土壤=(\d+)%\s+CO2=(\d+)\s+人体=(\d)\s+火焰=(\d)\s+'
     r'水位=([\d.]+)%\s+距离=(-?[\d.]+)cm\s+'
     r'温度=([\d.]+)℃\s+湿度=([\d.]+)%'
+)
+
+# 阈值汇总正则（提取火焰和人体蜂鸣模式）
+THRESHOLD_PATTERN = re.compile(
+    r'阈值汇总:.*?火焰=(自动|开启|关闭).*?人体=(自动|开启|关闭)'
 )
 
 
@@ -249,6 +254,17 @@ def main():
             
             line = raw.decode('utf-8', errors='ignore').strip()
             if not line:
+                continue
+            
+            # 检查是否为阈值汇总行（包含火焰/人体蜂鸣模式）
+            if '阈值汇总:' in line:
+                tm = THRESHOLD_PATTERN.search(line)
+                if tm:
+                    flame_mode = tm.group(1)
+                    human_mode = tm.group(2)
+                    DEVICE_STATES['flame'] = (flame_mode != '关闭')
+                    DEVICE_STATES['human'] = (human_mode != '关闭')
+                    print(f"   → 蜂鸣模式更新: 火焰={flame_mode}({DEVICE_STATES['flame']}), 人体={human_mode}({DEVICE_STATES['human']})")
                 continue
             
             # 跳过非传感器行

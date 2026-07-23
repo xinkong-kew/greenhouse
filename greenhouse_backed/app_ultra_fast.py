@@ -82,8 +82,8 @@ device_status_cache = {
     'fan_status': False,
     'motor_status': False,
     'buzzer_status': False,
-    'flame_status': True,   # 默认自动
-    'human_status': True,   # 默认自动
+    'flame_status': False,   # 默认关闭
+    'human_status': False,   # 默认关闭
     'flame_detected': False,
     'last_update': None
 }
@@ -94,8 +94,8 @@ device_action_cache = {
     'pump': 'off',
     'fan': 'off',
     'motor': 'off',
-    'flame': 'auto',
-    'human': 'auto',
+    'flame': 'off',
+    'human': 'off',
 }
 
 # 阈值缓存 - 记录已设置的阈值
@@ -1387,17 +1387,13 @@ def api_device_control():
         # 更新动作缓存（存储 'on'/'off'/'auto' 字符串）
         device_action_cache[device] = action
         
-        # 3. 尝试直接通过串口发送指令（立即生效）
-        direct_ok = send_serial_command_direct(cmd)
-        if not direct_ok:
-            # 如果直接发送失败，写入命令文件（serial_to_db_fixed.py 会读取并发送）
-            with open(CMD_FILE, 'w') as f:
-                json.dump({'cmd': cmd, 'pending': True}, f)
-            print(f"📝 [命令文件] {cmd} → 已写入队列，等待 serial_to_db_fixed.py 发送")
-        else:
-            # 直接发送成功，清空命令文件避免重复发送
-            with open(CMD_FILE, 'w') as f:
-                json.dump({'cmd': '', 'pending': False}, f)
+        # 3. 写入命令文件（serial_to_db_fixed.py 会读取并发送到串口）
+        with open(CMD_FILE, 'w') as f:
+            json.dump({'cmd': cmd, 'pending': True}, f)
+        print(f"📝 [命令文件] {cmd} → 已写入队列，等待 serial_to_db_fixed.py 发送")
+        
+        # 同时尝试直接串口发送（可能失败，因为串口可能被 serial_to_db_fixed.py 占用）
+        send_serial_command_direct(cmd)
         
         print(f"[设备控制] {cmd} → 数据库+缓存已更新")
         return jsonify({'success': True, 'cmd': cmd, 'message': f'{device} 已{"开启" if is_on else "关闭"}'})

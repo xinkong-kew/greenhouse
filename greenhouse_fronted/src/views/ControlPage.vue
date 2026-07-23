@@ -198,8 +198,8 @@ const deviceStatus = reactive({
   pump: false,
   fan: false,
   motor: false,
-  flame: true,   // 默认自动
-  human: true    // 默认自动
+  flame: false,   // 默认关闭
+  human: false    // 默认关闭
 })
 
 // 设备是否处于自动模式（用于区分"自动"和"已开启"的显示）
@@ -207,8 +207,8 @@ const deviceAutoMode = reactive({
   pump: true,
   fan: true,
   motor: true,
-  flame: true,
-  human: true
+  flame: false,
+  human: false
 })
 
 const allAutoLoading = ref(false)
