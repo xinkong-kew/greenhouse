@@ -320,9 +320,10 @@ def get_device_status_only():
     
     cursor = conn.cursor()
     try:
-        # 只查询设备状态字段，最快速查询
+        # 查询设备状态字段（含火焰/人体蜂鸣模式）
         cursor.execute("""
-            SELECT flame_detected, pump_status, fan_status, motor_status, buzzer_status, timestamp
+            SELECT flame_detected, pump_status, fan_status, motor_status, 
+                   buzzer_status, flame_status, human_status, timestamp
             FROM sensor_data 
             ORDER BY timestamp DESC 
             LIMIT 1
@@ -339,12 +340,15 @@ def get_device_status_only():
                 'fan_status': bool(result[2]),
                 'motor_status': bool(result[3]),
                 'buzzer_status': bool(result[4]),
-                'last_update': result[5].isoformat() if result[5] else None
+                'flame_status': bool(result[5]) if result[5] is not None else False,
+                'human_status': bool(result[6]) if result[6] is not None else False,
+                'last_update': result[7].isoformat() if result[7] else None
             }
             
             # 检查是否有状态变化
             status_changed = False
-            for key in ['flame_detected', 'pump_status', 'fan_status', 'motor_status', 'buzzer_status']:
+            for key in ['flame_detected', 'pump_status', 'fan_status', 'motor_status', 
+                        'buzzer_status', 'flame_status', 'human_status']:
                 if device_status_cache[key] != new_status[key]:
                     status_changed = True
             

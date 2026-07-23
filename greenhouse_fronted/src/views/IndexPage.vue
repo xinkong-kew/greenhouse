@@ -736,8 +736,9 @@ function handleDeviceStatusUpdate(data) {
   if (data.fan_status != null) devices.fan.state = data.fan_status
   if (data.motor_status != null) devices.motor.state = data.motor_status
   if (data.buzzer_status != null) devices.buzzer = data.buzzer_status
-  // 火焰检测状态
   if (data.flame_detected != null) devices.flame.state = data.flame_detected
+  if (data.flame_status != null) devices.flame.state = data.flame_status
+  if (data.human_status != null) devices.human.state = data.human_status
 }
 
 function handleWeatherUpdate(data) {
