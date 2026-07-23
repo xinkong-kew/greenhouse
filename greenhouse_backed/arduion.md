@@ -164,7 +164,7 @@ void loop() {
 
   // ---------- 串口指令处理 ----------
   if (Serial.available() > 0) {
-    String raw = Serial.readString();
+    String raw = Serial.readStringUntil('\n');
     raw.trim();
     Serial.print(F("收到指令: '")); Serial.print(raw); Serial.println(F("'"));
 

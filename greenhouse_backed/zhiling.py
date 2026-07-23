@@ -51,6 +51,9 @@ CURRENT_DEVICE_STATE = {
     'human': 'auto',
 }
 
+# 本地命令变更标记（避免服务器命令覆盖本地操作）
+LOCAL_CHANGED = set()
+
 # 本地阈值缓存（避免重复发送相同值）
 CURRENT_THRESHOLDS = {
     'temp': None,
@@ -264,7 +267,7 @@ def read_sensor_line(ser_ctrl):
 
 # 阈值汇总正则 - 解析 Arduino 实际设备状态
 THRESHOLD_SUMMARY_PATTERN = re.compile(
-    r'阈值汇总:.*?风扇=(\S+)\s+水泵=(\S+)\s+舵机=(\S+)'
+    r'阈值汇总:.*?风扇=(\S+)\s+水泵=(\S+)\s+舵机=(\S+)\s+火焰=(\S+)\s+人体=(\S+)'
 )
 
 
@@ -273,10 +276,13 @@ def parse_arduino_status(line):
     m = THRESHOLD_SUMMARY_PATTERN.search(line)
     if not m:
         return False
-    # 风扇=自动 → 'auto', 风扇=手动 → 保持原值不变
+    # 风扇/水泵/舵机状态
     fan_status = m.group(1)
     pump_status = m.group(2)
     motor_status = m.group(3)
+    # 火焰/人体蜂鸣模式
+    flame_status = m.group(4)
+    human_status = m.group(5)
 
     if fan_status == '自动':
         CURRENT_DEVICE_STATE['fan'] = 'auto'
@@ -285,7 +291,14 @@ def parse_arduino_status(line):
     if motor_status == '自动':
         CURRENT_DEVICE_STATE['motor'] = 'auto'
 
-    print(f"  [Arduino状态] 风扇={fan_status} 水泵={pump_status} 舵机={motor_status}")
+    # 火焰/人体：自动/开启/关闭
+    mode_map = {'自动': 'auto', '开启': 'on', '关闭': 'off'}
+    if flame_status in mode_map:
+        CURRENT_DEVICE_STATE['flame'] = mode_map[flame_status]
+    if human_status in mode_map:
+        CURRENT_DEVICE_STATE['human'] = mode_map[human_status]
+
+    print(f"  [Arduino状态] 风扇={fan_status} 水泵={pump_status} 舵机={motor_status} 火焰={flame_status} 人体={human_status}")
     return True
 
 def send_control_command(ser_ctrl, device, action):
@@ -301,6 +314,15 @@ def send_control_command(ser_ctrl, device, action):
     time.sleep(0.3)
     CURRENT_DEVICE_STATE[device] = action
     return True
+
+
+def send_control_command_local(ser_ctrl, device, action):
+    """通过本地命令文件发送指令，并标记为本地变更（避免服务器覆盖）"""
+    ok = send_control_command(ser_ctrl, device, action)
+    if ok:
+        LOCAL_CHANGED.add(device)
+        print(f"  🔒 标记 {device} 为本地变更，服务器同步将跳过")
+    return ok
 
 
 def check_local_commands(ser_ctrl):
@@ -340,7 +362,7 @@ def check_local_commands(ser_ctrl):
                                 pass
                             break
                 elif dev_name in DEVICE_CMD_MAP:
-                    send_control_command(ser_ctrl, dev_name, act_name)
+                    send_control_command_local(ser_ctrl, dev_name, act_name)
             # 清空命令文件
             with open(CMD_FILE, 'w') as f:
                 json.dump({'cmd': '', 'pending': False}, f)
@@ -416,7 +438,7 @@ def execute_get_sequence(ser_adp):
 # ==================== 状态同步 ====================
 
 def sync_device_state(ser_ctrl, server_commands):
-    """比对服务器指令与本地状态，发送差异控制指令（action: 'on'/'off'/'auto'）"""
+    """比对服务器指令与本地状态，发送差异控制指令（跳过近期本地变更的设备）"""
     if not server_commands:
         return False
 
@@ -427,6 +449,10 @@ def sync_device_state(ser_ctrl, server_commands):
     changed = False
     for device, target_action in device_cmds.items():
         if device not in CURRENT_DEVICE_STATE:
+            continue
+        # 跳过本地变更的设备（等待服务器同步更新）
+        if device in LOCAL_CHANGED:
+            print(f"  ⏭️ 跳过 {device}：本地已变更，等待服务器同步")
             continue
         current = CURRENT_DEVICE_STATE[device]
         if current != target_action:
