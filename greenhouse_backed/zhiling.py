@@ -20,6 +20,9 @@ import os
 # ==================== 本地命令文件（与 app_ultra_fast.py 共享） ====================
 CMD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'serial_cmd.json')
 
+# 设备状态共享文件（zhiling.py 写入，app_ultra_fast.py 读取）
+DEVICE_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'device_state.json')
+
 # ==================== 配置 ====================
 # ADP-L610 4G 模块（HTTP 通信）
 SERIAL_PORT_ADP = 'COM23'
@@ -259,8 +262,11 @@ def read_sensor_line(ser_ctrl):
                 'distance': round(distance, 1),
             }
         else:
-            # 非传感器行（如阈值汇总），打印出来便于调试
-            print(f"  [Arduino输出] {line}")
+            # 非传感器行（如阈值汇总），解析实际设备状态
+            if '阈值汇总:' in line:
+                parse_arduino_status(line)
+            else:
+                print(f"  [Arduino输出] {line}")
     print("  ⚠️ 读取传感器超时，使用上次数据")
     return None
 
@@ -284,22 +290,33 @@ def parse_arduino_status(line):
     flame_status = m.group(4)
     human_status = m.group(5)
 
-    if fan_status == '自动':
-        CURRENT_DEVICE_STATE['fan'] = 'auto'
-    if pump_status == '自动':
-        CURRENT_DEVICE_STATE['pump'] = 'auto'
-    if motor_status == '自动':
-        CURRENT_DEVICE_STATE['motor'] = 'auto'
-
-    # 火焰/人体：自动/开启/关闭
+    # 所有设备统一处理：自动/开启/关闭
     mode_map = {'自动': 'auto', '开启': 'on', '关闭': 'off'}
+    if fan_status in mode_map:
+        CURRENT_DEVICE_STATE['fan'] = mode_map[fan_status]
+    if pump_status in mode_map:
+        CURRENT_DEVICE_STATE['pump'] = mode_map[pump_status]
+    if motor_status in mode_map:
+        CURRENT_DEVICE_STATE['motor'] = mode_map[motor_status]
     if flame_status in mode_map:
         CURRENT_DEVICE_STATE['flame'] = mode_map[flame_status]
     if human_status in mode_map:
         CURRENT_DEVICE_STATE['human'] = mode_map[human_status]
 
     print(f"  [Arduino状态] 风扇={fan_status} 水泵={pump_status} 舵机={motor_status} 火焰={flame_status} 人体={human_status}")
+    
+    # 写入共享文件（供 app_ultra_fast.py 读取）
+    _write_device_state_to_file()
     return True
+
+
+def _write_device_state_to_file():
+    """将当前设备状态写入共享JSON文件，供 app_ultra_fast.py 读取"""
+    try:
+        with open(DEVICE_STATE_FILE, 'w') as f:
+            json.dump(CURRENT_DEVICE_STATE, f)
+    except Exception as e:
+        print(f"  ⚠️ 写入设备状态文件失败: {e}")
 
 def send_control_command(ser_ctrl, device, action):
     """向控制板串口发送设备控制指令（action: 'on'/'off'/'auto'）"""
@@ -405,7 +422,9 @@ def execute_post_sequence(ser_adp, sensor_data):
         'water': sensor_data.get('water', 0),
         'co2': sensor_data.get('co2', 0),
         'flame': sensor_data.get('flame', 0),
-        'pump': 1 if CURRENT_DEVICE_STATE.get('pump') == 'on' else 0,
+        'pump': 1 if CURRENT_DEVICE_STATE.get('pump') in ('on', 'auto') else 0,
+        'fan': 1 if CURRENT_DEVICE_STATE.get('fan') in ('on', 'auto') else 0,
+        'motor': 1 if CURRENT_DEVICE_STATE.get('motor') in ('on', 'auto') else 0,
     }
     json_str = json.dumps(payload, ensure_ascii=False)
     data_len = len(json_str.encode('utf-8'))
@@ -562,9 +581,9 @@ def main():
                         sensor_data.get('water', 0),
                         sensor_data.get('co2', 0),
                         sensor_data.get('flame', 0),
-                        1 if CURRENT_DEVICE_STATE.get('pump') == 'on' else 0,
-                        1 if CURRENT_DEVICE_STATE.get('fan') == 'on' else 0,
-                        1 if CURRENT_DEVICE_STATE.get('motor') == 'on' else 0,
+                        1 if CURRENT_DEVICE_STATE.get('pump') in ('on', 'auto') else 0,
+                        1 if CURRENT_DEVICE_STATE.get('fan') in ('on', 'auto') else 0,
+                        1 if CURRENT_DEVICE_STATE.get('motor') in ('on', 'auto') else 0,
                         0,  # buzzer 始终为 0
                     )
                     if not ok:
@@ -584,9 +603,9 @@ def main():
                                 sensor_data.get('water', 0),
                                 sensor_data.get('co2', 0),
                                 sensor_data.get('flame', 0),
-                                1 if CURRENT_DEVICE_STATE.get('pump') == 'on' else 0,
-                                1 if CURRENT_DEVICE_STATE.get('fan') == 'on' else 0,
-                                1 if CURRENT_DEVICE_STATE.get('motor') == 'on' else 0,
+                                1 if CURRENT_DEVICE_STATE.get('pump') in ('on', 'auto') else 0,
+                                1 if CURRENT_DEVICE_STATE.get('fan') in ('on', 'auto') else 0,
+                                1 if CURRENT_DEVICE_STATE.get('motor') in ('on', 'auto') else 0,
                                 0,
                             )
 

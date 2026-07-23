@@ -13,6 +13,9 @@ import os
 # 串口命令队列文件（由 app_ultra_fast.py 写入）
 CMD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'serial_cmd.json')
 
+# 设备状态共享文件（serial_to_db_fixed.py 写入，app_ultra_fast.py 读取）
+DEVICE_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'device_state.json')
+
 # 设备状态内存缓存（由 send_cmd 解析指令更新）
 # 注意：初始值必须与 Arduino 代码一致（flameBeepMode = BEEP_AUTO, humanBeepMode = BEEP_AUTO）
 DEVICE_STATES = {
@@ -54,9 +57,9 @@ SERIAL_PATTERN = re.compile(
     r'温度=([\d.]+)℃\s+湿度=([\d.]+)%'
 )
 
-# 阈值汇总正则（提取火焰和人体蜂鸣模式）
+# 阈值汇总正则（提取所有设备实际状态）
 THRESHOLD_PATTERN = re.compile(
-    r'阈值汇总:.*?火焰=(自动|开启|关闭).*?人体=(自动|开启|关闭)'
+    r'阈值汇总:.*?风扇=(\S+)\s+水泵=(\S+)\s+舵机=(\S+)\s+火焰=(\S+)\s+人体=(\S+)'
 )
 
 
@@ -219,6 +222,18 @@ def send_cmd(ser):
         pass
 
 
+def write_device_state_file(device_modes):
+    """将设备模式写入共享文件，供 app_ultra_fast.py 读取
+    
+    device_modes: dict, e.g. {'fan': 'auto', 'pump': 'off', 'motor': 'auto', 'flame': 'auto', 'human': 'auto', 'buzzer': 'off'}
+    """
+    try:
+        with open(DEVICE_STATE_FILE, 'w') as f:
+            json.dump(device_modes, f)
+    except Exception as e:
+        print(f"   ⚠️ 写入设备状态文件失败: {e}")
+
+
 def main():
     print("🚀 串口数据采集启动")
     
@@ -256,15 +271,32 @@ def main():
             if not line:
                 continue
             
-            # 检查是否为阈值汇总行（包含火焰/人体蜂鸣模式）
+            # 检查是否为阈值汇总行（包含所有设备实际状态）
             if '阈值汇总:' in line:
                 tm = THRESHOLD_PATTERN.search(line)
                 if tm:
-                    flame_mode = tm.group(1)
-                    human_mode = tm.group(2)
+                    fan_mode = tm.group(1)
+                    pump_mode = tm.group(2)
+                    motor_mode = tm.group(3)
+                    flame_mode = tm.group(4)
+                    human_mode = tm.group(5)
+                    # 更新设备状态：'关闭'→False, '自动'/'开启'→True
+                    DEVICE_STATES['fan'] = (fan_mode != '关闭')
+                    DEVICE_STATES['pump'] = (pump_mode != '关闭')
+                    DEVICE_STATES['motor'] = (motor_mode != '关闭')
                     DEVICE_STATES['flame'] = (flame_mode != '关闭')
                     DEVICE_STATES['human'] = (human_mode != '关闭')
-                    print(f"   → 蜂鸣模式更新: 火焰={flame_mode}({DEVICE_STATES['flame']}), 人体={human_mode}({DEVICE_STATES['human']})")
+                    print(f"   → 设备状态更新: 风扇={fan_mode}({DEVICE_STATES['fan']}), 水泵={pump_mode}({DEVICE_STATES['pump']}), 舵机={motor_mode}({DEVICE_STATES['motor']}), 火焰={flame_mode}({DEVICE_STATES['flame']}), 人体={human_mode}({DEVICE_STATES['human']})")
+                    # 将实际模式写入共享文件（供 app_ultra_fast.py 读取）
+                    mode_map = {'自动': 'auto', '开启': 'on', '关闭': 'off'}
+                    write_device_state_file({
+                        'fan': mode_map.get(fan_mode, 'off'),
+                        'pump': mode_map.get(pump_mode, 'off'),
+                        'motor': mode_map.get(motor_mode, 'off'),
+                        'flame': mode_map.get(flame_mode, 'off'),
+                        'human': mode_map.get(human_mode, 'off'),
+                        'buzzer': 'on' if DEVICE_STATES.get('buzzer') else 'off',
+                    })
                 continue
             
             # 跳过非传感器行

@@ -510,6 +510,12 @@ def ultra_fast_device_monitor():
             status, changed = get_device_status_only()
             
             if changed:
+                # 附加设备模式
+                status['pump_action'] = device_action_cache.get('pump', 'off')
+                status['fan_action'] = device_action_cache.get('fan', 'off')
+                status['motor_action'] = device_action_cache.get('motor', 'off')
+                status['flame_action'] = device_action_cache.get('flame', 'off')
+                status['human_action'] = device_action_cache.get('human', 'off')
                 # 立即推送设备状态变化
                 try:
                     socketio.emit('device_status_update', status)
@@ -606,6 +612,23 @@ def chart_data_monitor():
             
         time.sleep(30)  # 每30秒推送一次图表数据
 
+def device_state_file_monitor():
+    """监听设备状态共享文件，更新 device_action_cache（1秒间隔）"""
+    while True:
+        try:
+            if os.path.exists(DEVICE_STATE_FILE):
+                with open(DEVICE_STATE_FILE, 'r') as f:
+                    content = f.read().strip()
+                if content:
+                    state = json.loads(content)
+                    # 更新 device_action_cache（只更新文件中存在的键）
+                    for key in ['pump', 'fan', 'motor', 'flame', 'human']:
+                        if key in state:
+                            device_action_cache[key] = state[key]
+        except Exception as e:
+            pass  # 静默，文件可能正在被写入
+        time.sleep(1)
+
 def combined_data_monitor():
     """组合数据监控 - 兼容原有接口 - 2秒更新"""
     while True:
@@ -624,8 +647,13 @@ def handle_connect():
     """客户端连接时发送初始数据"""
     print('Client connected')
     
-    # 立即发送设备状态
+    # 立即发送设备状态（含模式）
     status, _ = get_device_status_only()
+    status['pump_action'] = device_action_cache.get('pump', 'off')
+    status['fan_action'] = device_action_cache.get('fan', 'off')
+    status['motor_action'] = device_action_cache.get('motor', 'off')
+    status['flame_action'] = device_action_cache.get('flame', 'off')
+    status['human_action'] = device_action_cache.get('human', 'off')
     emit('device_status_update', status)
     
     # 发送传感器数据
@@ -669,6 +697,11 @@ def handle_request_data():
 def handle_request_device_status():
     """专门的设备状态请求 - 超快响应"""
     status, _ = get_device_status_only()
+    status['pump_action'] = device_action_cache.get('pump', 'off')
+    status['fan_action'] = device_action_cache.get('fan', 'off')
+    status['motor_action'] = device_action_cache.get('motor', 'off')
+    status['flame_action'] = device_action_cache.get('flame', 'off')
+    status['human_action'] = device_action_cache.get('human', 'off')
     emit('device_status_update', status)
 
 @socketio.on('request_chart_data')
@@ -1298,6 +1331,9 @@ def api_threshold_query():
 # 串口命令队列文件（仅用于发送指令到 Arduino）
 CMD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'serial_cmd.json')
 
+# 设备状态共享文件（serial_to_db_fixed.py/zhiling.py 写入，本文件读取）
+DEVICE_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'device_state.json')
+
 def send_serial_command_direct(cmd):
     """尝试直接通过串口发送指令到 Arduino（绕过命令文件）"""
     try:
@@ -1393,7 +1429,13 @@ def api_device_control():
         
         # 立即推送设备状态变化到前端（确保实时反馈，不依赖监控线程轮询）
         try:
-            socketio.emit('device_status_update', device_status_cache)
+            push_status = dict(device_status_cache)
+            push_status['pump_action'] = device_action_cache.get('pump', 'off')
+            push_status['fan_action'] = device_action_cache.get('fan', 'off')
+            push_status['motor_action'] = device_action_cache.get('motor', 'off')
+            push_status['flame_action'] = device_action_cache.get('flame', 'off')
+            push_status['human_action'] = device_action_cache.get('human', 'off')
+            socketio.emit('device_status_update', push_status)
         except:
             pass
         
@@ -1598,13 +1640,22 @@ def api_adp610_health():
 
 @app.route('/api/device/status')
 def api_device_status():
-    """获取最新设备状态（从数据库读取）"""
+    """获取最新设备状态（从数据库读取）+ 设备模式（auto/on/off）"""
     status, _ = get_device_status_only()
-    return jsonify({
+    # 合并设备模式（从 device_action_cache 读取，区分 auto/on/off）
+    result = {
         'success': True,
-        'data': status,
+        'data': {
+            **status,
+            'pump_action': device_action_cache.get('pump', 'off'),
+            'fan_action': device_action_cache.get('fan', 'off'),
+            'motor_action': device_action_cache.get('motor', 'off'),
+            'flame_action': device_action_cache.get('flame', 'off'),
+            'human_action': device_action_cache.get('human', 'off'),
+        },
         'timestamp': datetime.now().isoformat()
-    })
+    }
+    return jsonify(result)
 
 @app.route('/api/device/commands', methods=['GET'])
 def api_device_commands():
@@ -2122,6 +2173,9 @@ def init_app():
     
     print("🔄 启动兼容数据监控线程 (2秒间隔)")
     run_with_restart(combined_data_monitor, "CombinedMonitor")
+    
+    print("📁 启动设备状态文件监听线程 (1秒间隔)")
+    run_with_restart(device_state_file_monitor, "DeviceStateFileMonitor")
     
     print("🌐 应用初始化完成，等待 HTTP 服务就绪...")
     print("⚡ 超快响应页面: /fast")

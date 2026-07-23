@@ -314,11 +314,11 @@ const sensors = reactive({
 
 // ===== 设备 =====
 const devices = reactive({
-  pump: { state: false },
-  fan: { state: false },
-  motor: { state: false },
-  flame: { state: false },
-  human: { state: false }
+  pump: { state: false, action: 'off' },
+  fan: { state: false, action: 'off' },
+  motor: { state: false, action: 'off' },
+  flame: { state: false, action: 'off' },
+  human: { state: false, action: 'off' }
 })
 
 // ===== 天气 =====
@@ -706,11 +706,18 @@ async function fetchDeviceStatus() {
     const json = await res.json()
     if (json.success && json.data) {
       const d = json.data
+      // 更新状态（boolean）
       if (d.pump_status != null) devices.pump.state = d.pump_status
       if (d.fan_status != null) devices.fan.state = d.fan_status
       if (d.motor_status != null) devices.motor.state = d.motor_status
       if (d.flame_status != null) devices.flame.state = d.flame_status
       if (d.human_status != null) devices.human.state = d.human_status
+      // 更新模式（auto/on/off）
+      if (d.pump_action != null) devices.pump.action = d.pump_action
+      if (d.fan_action != null) devices.fan.action = d.fan_action
+      if (d.motor_action != null) devices.motor.action = d.motor_action
+      if (d.flame_action != null) devices.flame.action = d.flame_action
+      if (d.human_action != null) devices.human.action = d.human_action
     }
   } catch {
     // 静默，Socket.IO 会兜底
@@ -756,6 +763,12 @@ function handleDeviceStatusUpdate(data) {
   if (data.motor_status != null) devices.motor.state = data.motor_status
   if (data.flame_status != null) devices.flame.state = data.flame_status
   if (data.human_status != null) devices.human.state = data.human_status
+  // 更新设备模式（auto/on/off）
+  if (data.pump_action != null) devices.pump.action = data.pump_action
+  if (data.fan_action != null) devices.fan.action = data.fan_action
+  if (data.motor_action != null) devices.motor.action = data.motor_action
+  if (data.flame_action != null) devices.flame.action = data.flame_action
+  if (data.human_action != null) devices.human.action = data.human_action
 }
 
 function handleWeatherUpdate(data) {
