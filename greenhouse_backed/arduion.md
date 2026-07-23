@@ -448,5 +448,5 @@ void loop() {
   // ---------- 刷新 OLED ----------
   updateDisplay(temp, humidity, soilPercent, co2Raw, waterPercent);
 
-  delay(1000);
+  delay(1500);
 }

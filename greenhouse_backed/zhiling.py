@@ -29,8 +29,8 @@ BAUDRATE_ADP = 115200
 SERIAL_PORT_CTRL = 'COM28'
 BAUDRATE_CTRL = 9600
 
-CMD_INTERVAL = 0.2      # 每条指令间隔（秒）
-CYCLE_INTERVAL = 1       # 每轮执行间隔（秒）
+CMD_INTERVAL = 0.1      # 每条指令间隔（秒）
+CYCLE_INTERVAL = 0.3       # 每轮执行间隔（秒）
 LINE_ENDING = '\r\n'    # AT 指令换行符
 SENSOR_READ_TIMEOUT = 4  # 读取传感器超时（秒）
 
@@ -405,7 +405,7 @@ def execute_post_sequence(ser_adp, sensor_data):
         'water': sensor_data.get('water', 0),
         'co2': sensor_data.get('co2', 0),
         'flame': sensor_data.get('flame', 0),
-        'pump': 1 if CURRENT_DEVICE_STATE.get('pump') else 0,
+        'pump': 1 if CURRENT_DEVICE_STATE.get('pump') == 'on' else 0,
     }
     json_str = json.dumps(payload, ensure_ascii=False)
     data_len = len(json_str.encode('utf-8'))
@@ -562,9 +562,9 @@ def main():
                         sensor_data.get('water', 0),
                         sensor_data.get('co2', 0),
                         sensor_data.get('flame', 0),
-                        1 if CURRENT_DEVICE_STATE.get('pump') else 0,
-                        1 if CURRENT_DEVICE_STATE.get('fan') else 0,
-                        1 if CURRENT_DEVICE_STATE.get('motor') else 0,
+                        1 if CURRENT_DEVICE_STATE.get('pump') == 'on' else 0,
+                        1 if CURRENT_DEVICE_STATE.get('fan') == 'on' else 0,
+                        1 if CURRENT_DEVICE_STATE.get('motor') == 'on' else 0,
                         0,  # buzzer 始终为 0
                     )
                     if not ok:
@@ -584,9 +584,9 @@ def main():
                                 sensor_data.get('water', 0),
                                 sensor_data.get('co2', 0),
                                 sensor_data.get('flame', 0),
-                                1 if CURRENT_DEVICE_STATE.get('pump') else 0,
-                                1 if CURRENT_DEVICE_STATE.get('fan') else 0,
-                                1 if CURRENT_DEVICE_STATE.get('motor') else 0,
+                                1 if CURRENT_DEVICE_STATE.get('pump') == 'on' else 0,
+                                1 if CURRENT_DEVICE_STATE.get('fan') == 'on' else 0,
+                                1 if CURRENT_DEVICE_STATE.get('motor') == 'on' else 0,
                                 0,
                             )
 

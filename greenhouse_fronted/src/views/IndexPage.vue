@@ -697,6 +697,25 @@ async function sendChatMessage() {
 
 // ===== REST API 轮询回退（当 Socket.IO 连接不可用时） =====
 let weatherPollTimer = null
+let deviceStatusPollTimer = null
+
+// 从数据库读取设备状态（REST API，确保即使 Socket.IO 断开也能获取状态）
+async function fetchDeviceStatus() {
+  try {
+    const res = await fetch('/api/device/status')
+    const json = await res.json()
+    if (json.success && json.data) {
+      const d = json.data
+      if (d.pump_status != null) devices.pump.state = d.pump_status
+      if (d.fan_status != null) devices.fan.state = d.fan_status
+      if (d.motor_status != null) devices.motor.state = d.motor_status
+      if (d.flame_status != null) devices.flame.state = d.flame_status
+      if (d.human_status != null) devices.human.state = d.human_status
+    }
+  } catch {
+    // 静默，Socket.IO 会兜底
+  }
+}
 
 async function fetchWeatherAgentData() {
   try {
@@ -735,8 +754,6 @@ function handleDeviceStatusUpdate(data) {
   if (data.pump_status != null) devices.pump.state = data.pump_status
   if (data.fan_status != null) devices.fan.state = data.fan_status
   if (data.motor_status != null) devices.motor.state = data.motor_status
-  if (data.buzzer_status != null) devices.buzzer = data.buzzer_status
-  if (data.flame_detected != null) devices.flame.state = data.flame_detected
   if (data.flame_status != null) devices.flame.state = data.flame_status
   if (data.human_status != null) devices.human.state = data.human_status
 }
@@ -829,6 +846,11 @@ onMounted(async () => {
     // 静默
   }
 
+  // 从数据库读取设备状态（REST API 兜底，确保即使 Socket.IO 未推送也能显示）
+  fetchDeviceStatus()
+  // 每3秒轮询数据库设备状态，与 Socket.IO 实时推送互补
+  deviceStatusPollTimer = setInterval(fetchDeviceStatus, 3000)
+
   // REST API 轮询回退：每15秒通过 API 获取天气和智能体数据
   // 当 Socket.IO 连接不可用时（如 Nginx 未代理 /socket.io/），此机制确保数据仍能显示
   fetchWeatherAgentData()
@@ -846,6 +868,10 @@ onUnmounted(() => {
     clearInterval(weatherPollTimer)
     weatherPollTimer = null
   }
+  if (deviceStatusPollTimer) {
+    clearInterval(deviceStatusPollTimer)
+    deviceStatusPollTimer = null
+  }
   document.removeEventListener('keydown', onKeydown)
 })
 
@@ -854,6 +880,7 @@ onActivated(() => {
   socket.emit('request_weather')
   socket.emit('request_chart_data')
   socket.emit('request_device_status')
+  fetchDeviceStatus()  // REST API 兜底获取设备状态
   monitorLoading.value = false  // 监控画面已缓存，无需重新加载
 })
 

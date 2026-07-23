@@ -316,7 +316,7 @@ def get_device_status_only():
     """仅获取设备状态，超快速查询"""
     conn = get_db_connection()
     if not conn:
-        return device_status_cache
+        return device_status_cache, False
     
     cursor = conn.cursor()
     try:
@@ -1391,6 +1391,12 @@ def api_device_control():
         # 更新动作缓存（存储 'on'/'off'/'auto' 字符串）
         device_action_cache[device] = action
         
+        # 立即推送设备状态变化到前端（确保实时反馈，不依赖监控线程轮询）
+        try:
+            socketio.emit('device_status_update', device_status_cache)
+        except:
+            pass
+        
         # 3. 写入命令文件（serial_to_db_fixed.py 会读取并发送到串口）
         with open(CMD_FILE, 'w') as f:
             json.dump({'cmd': cmd, 'pending': True}, f)
@@ -1588,6 +1594,16 @@ def api_adp610_health():
         'method': 'POST',
         'content_type': 'application/json',
         'timestamp': datetime.now().isoformat(),
+    })
+
+@app.route('/api/device/status')
+def api_device_status():
+    """获取最新设备状态（从数据库读取）"""
+    status, _ = get_device_status_only()
+    return jsonify({
+        'success': True,
+        'data': status,
+        'timestamp': datetime.now().isoformat()
     })
 
 @app.route('/api/device/commands', methods=['GET'])
