@@ -133,16 +133,16 @@ def ensure_table(conn):
         print(f"[数据库] 建表失败: {e}")
 
 
-def insert_sensor_data(conn, temp, hum, soil, water, co2_val, flame, pump, fan, motor, buzzer):
+def insert_sensor_data(conn, temp, hum, soil, water, co2_val, flame, human_det, pump, fan, motor, buzzer):
     """插入一条传感器数据到数据库"""
     try:
         c = conn.cursor()
         c.execute("""
             INSERT INTO sensor_data 
             (timestamp, temperature, humidity, soil_moisture, water_level, co2,
-             flame_detected, pump_status, fan_status, motor_status, buzzer_status) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (datetime.now(), temp, hum, soil, water, co2_val, flame, pump, fan, motor, buzzer))
+             flame_detected, human_detected, pump_status, fan_status, motor_status, buzzer_status) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (datetime.now(), temp, hum, soil, water, co2_val, flame, human_det, pump, fan, motor, buzzer))
         conn.commit()
         c.close()
         return True
@@ -246,10 +246,12 @@ def read_sensor_line(ser_ctrl):
 
             # 火焰：level==0 表示检测到火焰
             flame_detected = 1 if (flame_level == 0) else 0
+            # 人体：level==0 表示检测到人体
+            human_detected = 1 if (human_level == 0) else 0
 
             print(f"  [传感器] 温度={temperature:.1f}℃ 湿度={humidity:.1f}% "
                   f"土壤={soil_percent:.1f}% 水位={water_percent:.1f}% "
-                  f"CO2={co2_raw} 火焰={flame_detected} 人体={human_level}")
+                  f"CO2={co2_raw} 火焰={flame_detected} 人体={human_detected}")
 
             return {
                 'temp': round(temperature, 1),
@@ -257,7 +259,7 @@ def read_sensor_line(ser_ctrl):
                 'soil': soil_percent,
                 'co2': co2_raw,
                 'flame': flame_detected,
-                'human': human_level,
+                'human': human_detected,
                 'water': round(water_percent, 1),
                 'distance': round(distance, 1),
             }
@@ -581,6 +583,7 @@ def main():
                         sensor_data.get('water', 0),
                         sensor_data.get('co2', 0),
                         sensor_data.get('flame', 0),
+                        sensor_data.get('human', 0),  # human_detected
                         1 if CURRENT_DEVICE_STATE.get('pump') in ('on', 'auto') else 0,
                         1 if CURRENT_DEVICE_STATE.get('fan') in ('on', 'auto') else 0,
                         1 if CURRENT_DEVICE_STATE.get('motor') in ('on', 'auto') else 0,
@@ -603,6 +606,7 @@ def main():
                                 sensor_data.get('water', 0),
                                 sensor_data.get('co2', 0),
                                 sensor_data.get('flame', 0),
+                                sensor_data.get('human', 0),  # human_detected
                                 1 if CURRENT_DEVICE_STATE.get('pump') in ('on', 'auto') else 0,
                                 1 if CURRENT_DEVICE_STATE.get('fan') in ('on', 'auto') else 0,
                                 1 if CURRENT_DEVICE_STATE.get('motor') in ('on', 'auto') else 0,

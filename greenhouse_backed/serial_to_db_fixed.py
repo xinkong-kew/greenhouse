@@ -136,9 +136,10 @@ def ensure_table(conn):
         """)
         conn.commit()
         # 兼容旧表：尝试添加可能缺失的列
-        for col in ['co2', 'flame_status', 'human_status']:
+        for col in ['co2', 'flame_status', 'human_status', 'human_detected']:
             try:
-                c.execute(f"ALTER TABLE sensor_data ADD COLUMN {col} INT")
+                col_type = 'INT' if col in ('co2',) else 'TINYINT(1) DEFAULT 0'
+                c.execute(f"ALTER TABLE sensor_data ADD COLUMN {col} {col_type}")
                 conn.commit()
                 print(f"✅ 已添加缺失的列: {col}")
             except Exception:
@@ -148,17 +149,17 @@ def ensure_table(conn):
         print(f"建表失败: {e}")
 
 
-def insert_sensor_data(conn, temp, hum, soil, water, co2_val, flame, pump, fan, motor, buzzer, flame_status=None, human_status=None):
+def insert_sensor_data(conn, temp, hum, soil, water, co2_val, flame, human_det, pump, fan, motor, buzzer, flame_status=None, human_status=None):
     """插入一条传感器数据"""
     try:
         c = conn.cursor()
         c.execute("""
             INSERT INTO sensor_data 
             (timestamp, temperature, humidity, soil_moisture, water_level, co2,
-             flame_detected, pump_status, fan_status, motor_status, buzzer_status,
+             flame_detected, human_detected, pump_status, fan_status, motor_status, buzzer_status,
              flame_status, human_status) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (datetime.now(), temp, hum, soil, water, co2_val, flame, pump, fan, motor, buzzer,
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (datetime.now(), temp, hum, soil, water, co2_val, flame, human_det, pump, fan, motor, buzzer,
               flame_status if flame_status is not None else DEVICE_STATES.get('flame', True),
               human_status if human_status is not None else DEVICE_STATES.get('human', True)))
         conn.commit()
@@ -328,6 +329,9 @@ def main():
             
             flame_detected = (flame_level == 0)
             
+            # 人体检测：level==0 表示检测到人体
+            human_detected = (human_level == 0)
+            
             # 从内存缓存读取设备状态（由 send_cmd 根据指令更新）
             pump_status = DEVICE_STATES.get('pump', False)
             fan_status = DEVICE_STATES.get('fan', False)
@@ -345,7 +349,7 @@ def main():
             # 写入数据库（失败时重连一次）
             ok = insert_sensor_data(conn, temperature, humidity, soil_moisture,
                                     water_level, co2_raw,
-                                    flame_detected,
+                                    flame_detected, human_detected,
                                     pump_status, fan_status, motor_status, buzzer_status)
             if not ok:
                 print("⚠️ 数据库写入失败，尝试重连...")
@@ -358,7 +362,7 @@ def main():
                 if conn:
                     ok = insert_sensor_data(conn, temperature, humidity, soil_moisture,
                                            water_level, co2_raw,
-                                           flame_detected,
+                                           flame_detected, human_detected,
                                            pump_status, fan_status, motor_status, buzzer_status)
             
             if ok:

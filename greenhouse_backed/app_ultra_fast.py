@@ -85,6 +85,7 @@ device_status_cache = {
     'flame_status': False,   # 默认关闭
     'human_status': False,   # 默认关闭
     'flame_detected': False,
+    'human_detected': False,
     'last_update': None
 }
 
@@ -320,9 +321,9 @@ def get_device_status_only():
     
     cursor = conn.cursor()
     try:
-        # 查询设备状态字段（含火焰/人体蜂鸣模式）
+        # 查询设备状态字段（含火焰/人体检测及蜂鸣模式）
         cursor.execute("""
-            SELECT flame_detected, pump_status, fan_status, motor_status, 
+            SELECT flame_detected, human_detected, pump_status, fan_status, motor_status, 
                    buzzer_status, flame_status, human_status, timestamp
             FROM sensor_data 
             ORDER BY timestamp DESC 
@@ -336,18 +337,19 @@ def get_device_status_only():
         if result:
             new_status = {
                 'flame_detected': bool(result[0]),
-                'pump_status': bool(result[1]),
-                'fan_status': bool(result[2]),
-                'motor_status': bool(result[3]),
-                'buzzer_status': bool(result[4]),
-                'flame_status': bool(result[5]) if result[5] is not None else False,
-                'human_status': bool(result[6]) if result[6] is not None else False,
-                'last_update': result[7].isoformat() if result[7] else None
+                'human_detected': bool(result[1]) if result[1] is not None else False,
+                'pump_status': bool(result[2]),
+                'fan_status': bool(result[3]),
+                'motor_status': bool(result[4]),
+                'buzzer_status': bool(result[5]),
+                'flame_status': bool(result[6]) if result[6] is not None else False,
+                'human_status': bool(result[7]) if result[7] is not None else False,
+                'last_update': result[8].isoformat() if result[8] else None
             }
             
             # 检查是否有状态变化
             status_changed = False
-            for key in ['flame_detected', 'pump_status', 'fan_status', 'motor_status', 
+            for key in ['flame_detected', 'human_detected', 'pump_status', 'fan_status', 'motor_status', 
                         'buzzer_status', 'flame_status', 'human_status']:
                 if device_status_cache[key] != new_status[key]:
                     status_changed = True

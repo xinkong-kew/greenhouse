@@ -711,7 +711,8 @@ async function fetchDeviceStatus() {
       if (d.fan_status != null) devices.fan.state = d.fan_status
       if (d.motor_status != null) devices.motor.state = d.motor_status
       if (d.flame_status != null) devices.flame.state = d.flame_status
-      if (d.human_status != null) devices.human.state = d.human_status
+      // 安防警报：检测到人体时亮起
+      if (d.human_detected != null) devices.human.state = d.human_detected
       // 更新模式（auto/on/off）
       if (d.pump_action != null) devices.pump.action = d.pump_action
       if (d.fan_action != null) devices.fan.action = d.fan_action
@@ -753,7 +754,8 @@ function handleRealtimeUpdate(data) {
   if (data.fan_status != null) devices.fan.state = data.fan_status
   if (data.motor_status != null) devices.motor.state = data.motor_status
   if (data.flame_status != null) devices.flame.state = data.flame_status
-  if (data.human_status != null) devices.human.state = data.human_status
+  // 安防警报：检测到人体时亮起
+  if (data.human_detected != null) devices.human.state = data.human_detected
 }
 
 function handleDeviceStatusUpdate(data) {
@@ -762,7 +764,8 @@ function handleDeviceStatusUpdate(data) {
   if (data.fan_status != null) devices.fan.state = data.fan_status
   if (data.motor_status != null) devices.motor.state = data.motor_status
   if (data.flame_status != null) devices.flame.state = data.flame_status
-  if (data.human_status != null) devices.human.state = data.human_status
+  // 安防警报：检测到人体时亮起
+  if (data.human_detected != null) devices.human.state = data.human_detected
   // 更新设备模式（auto/on/off）
   if (data.pump_action != null) devices.pump.action = data.pump_action
   if (data.fan_action != null) devices.fan.action = data.fan_action
