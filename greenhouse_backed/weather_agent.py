@@ -201,7 +201,8 @@ class WeatherAgent:
     # ==================== 智能决策 ====================
 
     def make_decisions(self, sensor_data: Optional[Dict] = None) -> List[Dict]:
-        """基于天气预报 + 当前传感器数据做出决策"""
+        """基于天气预报 + 当前传感器数据做出智能决策
+        注意：只建议 Arduino 实际支持的功能（arduion.md 中的设备）"""
         decisions = []
         forecast = self.forecast_cache
 
@@ -218,50 +219,42 @@ class WeatherAgent:
         summary = forecast.get('summary', {})
         next_12h = forecast['forecast'][:4] if len(forecast['forecast']) >= 4 else forecast['forecast']
 
-        # --- 决策 1: 降雨判断（仅看近12小时） ---
-        if summary.get('now_is_raining'):
+        # --- 决策 1: 降雨判断（调整土壤阈值，让自动水泵适配天气） ---
+        if summary.get('now_is_raining') or summary.get('heavy_rain'):
             decisions.append({
                 'time': datetime.now().strftime('%H:%M:%S'),
                 'level': 'warning',
                 'type': 'rain',
-                'action': '⚠️ 当前正在下雨，建议关闭水泵',
-                'reason': f'当前降雨概率 {summary.get("current_pop",0)*100:.0f}%，自然降雨可补充水分'
-            })
-        elif summary.get('heavy_rain'):
-            decisions.append({
-                'time': datetime.now().strftime('%H:%M:%S'),
-                'level': 'warning',
-                'type': 'rain',
-                'action': '⚠️ 未来12小时预计有大雨，建议关闭水泵',
-                'reason': f'大雨即将来临，自然降雨可补充水分，避免过度灌溉'
+                'action': '⛈️ 当前有雨/大雨预报，建议调低土壤湿度阈值（SET_SOIL 30），避免自动浇水过湿',
+                'reason': f'自然降雨可补充水分，降低土壤阈值可让自动水泵在更干时才启动'
             })
         elif summary.get('has_rain'):
             decisions.append({
                 'time': datetime.now().strftime('%H:%M:%S'),
                 'level': 'info',
                 'type': 'rain',
-                'action': '🌧️ 未来12小时可能有雨，建议减少灌溉量',
-                'reason': '预计有降雨，适当降低土壤湿度目标值'
+                'action': '🌧️ 未来12小时可能有雨，建议适当调低土壤湿度阈值（SET_SOIL 40）',
+                'reason': '预计有降雨，调低阈值可减少自动灌溉频率'
             })
 
-        # --- 决策 2: 高温判断 ---
+        # --- 决策 2: 高温判断（调低温度阈值，让自动风扇提前启动） ---
         if summary.get('extreme_high'):
             decisions.append({
                 'time': datetime.now().strftime('%H:%M:%S'),
                 'level': 'warning',
                 'type': 'temp',
-                'action': '🔥 建议开启风扇通风降温',
-                'reason': f'预计最高温度 {summary["max_temp"]}°C，超过 {THRESHOLDS["temp_high"]}°C 阈值'
+                'action': '🔥 高温预警，建议调低风扇启动温度阈值（SET_TEMP 32），并确保风扇处于自动模式（FAN_AUTO）',
+                'reason': f'预计最高 {summary["max_temp"]}°C，降低温度阈值可使风扇提前自动开启通风'
             })
 
-        # --- 决策 3: 低温判断 ---
+        # --- 决策 3: 低温判断（调高温度阈值，让风扇更晚启动） ---
         if summary.get('extreme_low'):
             decisions.append({
                 'time': datetime.now().strftime('%H:%M:%S'),
                 'level': 'warning',
                 'type': 'temp',
-                'action': '🥶 建议关闭通风，开启保温措施',
-                'reason': f'预计最低温度 {summary["min_temp"]}°C，低于 {THRESHOLDS["temp_low"]}°C 阈值'
+                'action': '🥶 低温预警，建议调高风扇启动温度阈值（SET_TEMP 42），确保风扇不误开',
+                'reason': f'预计最低 {summary["min_temp"]}°C，提高温度阈值可避免风扇在低温时自动开启'
             })
 
         # --- 决策 4: 结合当前传感器数据 ---
@@ -270,33 +263,34 @@ class WeatherAgent:
             temp = sensor_data.get('latest_temp', 25)
             hum = sensor_data.get('latest_hum', 60)
             water = sensor_data.get('latest_water', 50)
+            co2 = sensor_data.get('latest_co2', 400)
 
-            # 土壤湿度 + 天气综合判断
+            # 土壤湿度 + 天气综合判断（调整阈值，让自动水泵更智能）
             if soil < THRESHOLDS['soil_dry'] and not summary.get('has_rain'):
                 decisions.append({
                     'time': datetime.now().strftime('%H:%M:%S'),
                     'level': 'warning',
                     'type': 'soil',
-                    'action': '💧 建议开启水泵灌溉',
-                    'reason': f'土壤湿度 {soil}% 偏低，且近期无雨，需人工灌溉'
+                    'action': '💧 土壤偏干且无雨，建议调高土壤湿度阈值（SET_SOIL 45），并确保水泵处于自动模式（auto）',
+                    'reason': f'土壤湿度 {soil}% 偏低，提高阈值可使自动水泵在更湿时就开始浇水'
                 })
             elif soil < THRESHOLDS['soil_dry'] and summary.get('has_rain'):
                 decisions.append({
                     'time': datetime.now().strftime('%H:%M:%S'),
                     'level': 'info',
                     'type': 'soil',
-                    'action': '⏳ 暂缓灌溉，等待自然降雨',
-                    'reason': f'土壤湿度 {soil}% 偏低，但预报有雨，可等待自然降雨'
+                    'action': '⏳ 土壤偏干但预报有雨，保持当前土壤阈值，让自动水泵自然等待降雨',
+                    'reason': f'土壤湿度 {soil}% 偏低，但预报有雨，自动模式会配合降雨'
                 })
 
-            # 湿度判断
+            # 湿度判断（利用风扇排湿，通过调整湿度阈值）
             if hum > THRESHOLDS['hum_high']:
                 decisions.append({
                     'time': datetime.now().strftime('%H:%M:%S'),
                     'level': 'info',
                     'type': 'hum',
-                    'action': '💨 建议开启风扇促进通风排湿',
-                    'reason': f'湿度 {hum}% 过高，易引发病害'
+                    'action': '💨 湿度过高，建议开启风扇（FAN_ON）或调低温度阈值（SET_TEMP 30）让自动风扇排湿',
+                    'reason': f'湿度 {hum}% 过高，风扇运转可促进空气流通降低湿度'
                 })
 
             # 水位判断
@@ -305,8 +299,26 @@ class WeatherAgent:
                     'time': datetime.now().strftime('%H:%M:%S'),
                     'level': 'warning',
                     'type': 'water',
-                    'action': '🚱 水位过低，请检查水源',
-                    'reason': f'水位仅 {water}%，可能需要补充水源'
+                    'action': '🚱 水位过低，请检查水源及超声波传感器',
+                    'reason': f'水位仅 {water}%，低于 {THRESHOLDS["water_low"]}% 阈值'
+                })
+
+            # CO₂ 判断（利用舵机自动通风）
+            if co2 > 600:
+                decisions.append({
+                    'time': datetime.now().strftime('%H:%M:%S'),
+                    'level': 'info',
+                    'type': 'co2',
+                    'action': '🌬️ CO₂偏高，建议开启舵机自动通风模式（SERVO_AUTO），CO₂超标时自动开窗',
+                    'reason': f'当前CO₂ {co2}，舵机自动模式会在CO₂超过阈值时打开通风口'
+                })
+            elif co2 > 400:
+                decisions.append({
+                    'time': datetime.now().strftime('%H:%M:%S'),
+                    'level': 'info',
+                    'type': 'co2',
+                    'action': '🌬️ CO₂略高，建议检查舵机是否已开启自动模式（SERVO_AUTO）',
+                    'reason': f'当前CO₂ {co2}，舵机自动通风可改善空气质量'
                 })
 
         # --- 决策 5: 综合建议 ---
@@ -315,19 +327,20 @@ class WeatherAgent:
                 'time': datetime.now().strftime('%H:%M:%S'),
                 'level': 'info',
                 'type': 'advice',
-                'action': '📋 建议关注天气预报变化，提前做好大棚防护措施',
-                'reason': f'未来天气波动较大（{summary["min_temp"]}~{summary["max_temp"]}°C）'
+                'action': '📋 极端天气来临，建议提前调整各设备阈值，让自动模式应对更充分',
+                'reason': f'未来气温 {summary["min_temp"]}~{summary["max_temp"]}°C，波动较大'
             })
 
-        # 如果没有触发任何决策，生成一条正常信息
-        if not decisions:
-            decisions.append({
-                'time': datetime.now().strftime('%H:%M:%S'),
-                'level': 'info',
-                'type': 'normal',
-                'action': '✅ 天气状况良好，大棚运行正常',
-                'reason': f'未来气温 {summary["min_temp"]}~{summary["max_temp"]}°C，{summary.get("today_desc", "天气正常")}'
-            })
+        # 实时天气播报（始终显示）
+        decisions.append({
+            'time': datetime.now().strftime('%H:%M:%S'),
+            'level': 'info',
+            'type': 'normal',
+            'action': f'🌡️ 当前气温 {summary.get("today_desc", "正常")}，'
+                      f'未来 {summary["min_temp"]}~{summary["max_temp"]}°C，'
+                      f'{"☔ 有雨" if summary.get("has_rain") else "☀️ 无雨"}',
+            'reason': f'各设备运行中，自动模式持续监控'
+        })
 
         return decisions
 

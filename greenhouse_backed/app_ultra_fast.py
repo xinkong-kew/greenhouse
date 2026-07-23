@@ -914,7 +914,7 @@ def api_agent_toggle():
 
 @app.route('/api/weather/tomorrow_suggestions')
 def api_tomorrow_suggestions():
-    """获取明天天气预报及可执行建议（含设备控制指令）"""
+    """获取明天天气预报及可执行建议（仅包含 Arduino 实际支持的功能）"""
     if not weather_agent:
         return jsonify({'success': False, 'error': '智能体未初始化'})
     
@@ -935,7 +935,6 @@ def api_tomorrow_suggestions():
                          if datetime.fromtimestamp(f['dt']).date() == tomorrow_date]
     
     if not tomorrow_forecasts:
-        # 如果预报数据不足2天，使用剩余所有数据作为"明天"参考
         half = len(forecast['forecast']) // 2
         tomorrow_forecasts = forecast['forecast'][half:]
     
@@ -954,125 +953,100 @@ def api_tomorrow_suggestions():
     # 获取当前传感器数据辅助判断
     sensor_data = get_sensor_data_only()
     soil_moisture = sensor_data.get('latest_soil', 50) if sensor_data else 50
+    co2_level = sensor_data.get('latest_co2', 400) if sensor_data else 400
     
-    # 生成建议和可执行指令
+    # 生成建议（仅 Arduino 支持的功能）
     suggestions = []
     
-    # --- 降雨建议 ---
+    # --- 降雨建议（调整土壤阈值，让自动水泵适配） ---
     if heavy_rain:
         suggestions.append({
-            'type': 'device',
+            'type': 'threshold',
             'icon': '⛈️',
-            'suggestion': '明天预计有大雨，建议关闭水泵',
-            'reason': f'降雨概率 {(max(f.get("pop",0) for f in tomorrow_forecasts)*100):.0f}%，自然降雨可充分补充水分',
+            'suggestion': '明天预计有大雨，建议调低土壤湿度阈值，避免自动浇水过湿',
+            'reason': f'大雨即将来临，自然降雨可补充水分，调低土壤阈值（SET_SOIL 30）让自动水泵在更干时才启动',
             'commands': [
-                {'device': 'pump', 'action': 'off', 'label': '关闭水泵'}
+                {'type': 'threshold', 'sensorType': 'soil', 'value': 30, 'label': '土壤阈值→30%'}
             ]
         })
     elif has_rain:
         suggestions.append({
-            'type': 'device',
-            'icon': '🌧️',
-            'suggestion': '明天预计有雨，建议减少灌溉或关闭水泵',
-            'reason': '有降雨预报，适当降低灌溉量防止过湿',
-            'commands': [
-                {'device': 'pump', 'action': 'off', 'label': '关闭水泵'}
-            ]
-        })
-    elif soil_moisture < 30:
-        # 土壤干燥且无雨，建议灌溉
-        suggestions.append({
-            'type': 'device',
-            'icon': '💧',
-            'suggestion': '明天无雨且土壤偏干，建议开启水泵灌溉',
-            'reason': f'土壤湿度 {soil_moisture:.0f}% 偏低，无降雨预报，需人工灌溉',
-            'commands': [
-                {'device': 'pump', 'action': 'on', 'label': '开启水泵'}
-            ]
-        })
-    
-    # --- 高温建议 ---
-    if max_temp >= 35:
-        suggestions.append({
-            'type': 'device',
-            'icon': '🔥',
-            'suggestion': '明天高温，建议开启风扇通风降温',
-            'reason': f'预计最高温度 {max_temp:.1f}°C，超过35°C阈值',
-            'commands': [
-                {'device': 'fan', 'action': 'on', 'label': '开启风扇'}
-            ]
-        })
-    elif max_temp >= 30:
-        suggestions.append({
-            'type': 'device',
-            'icon': '🌡️',
-            'suggestion': '明天温度较高，可提前开启风扇通风',
-            'reason': f'预计最高温度 {max_temp:.1f}°C，建议提前通风',
-            'commands': [
-                {'device': 'fan', 'action': 'on', 'label': '开启风扇'}
-            ]
-        })
-    
-    # --- 低温建议 ---
-    if min_temp <= 5:
-        suggestions.append({
-            'type': 'device',
-            'icon': '🥶',
-            'suggestion': '明天低温，建议关闭风扇保温',
-            'reason': f'预计最低温度 {min_temp:.1f}°C，低于5°C阈值',
-            'commands': [
-                {'device': 'fan', 'action': 'off', 'label': '关闭风扇'}
-            ]
-        })
-    
-    # --- 阈值调整建议 ---
-    # 大雨/有雨时建议降低土壤湿度阈值，避免误触灌溉
-    if heavy_rain or has_rain:
-        suggestions.append({
             'type': 'threshold',
-            'icon': '🌱',
-            'suggestion': '明天有雨，建议调低土壤湿度阈值',
-            'reason': '降低土壤湿度报警阈值，避免因降雨触发误报警',
+            'icon': '🌧️',
+            'suggestion': '明天预计有雨，建议适当调低土壤湿度阈值',
+            'reason': '有降雨预报，调低土壤阈值（SET_SOIL 40）可减少自动灌溉频率',
             'commands': [
                 {'type': 'threshold', 'sensorType': 'soil', 'value': 40, 'label': '土壤阈值→40%'}
             ]
         })
     elif soil_moisture < 30:
-        # 土壤干且无雨，建议提高土壤湿度阈值保持灌溉
+        # 土壤干燥且无雨，建议提高土壤阈值，让自动水泵多浇水
         suggestions.append({
             'type': 'threshold',
-            'icon': '🌱',
-            'suggestion': '土壤偏干且无雨，建议提高土壤湿度阈值',
-            'reason': f'当前土壤湿度 {soil_moisture:.0f}%，适当提高阈值保持灌溉频率',
+            'icon': '💧',
+            'suggestion': '明天无雨且土壤偏干，建议调高土壤湿度阈值，让自动水泵增加灌溉',
+            'reason': f'土壤湿度 {soil_moisture:.0f}% 偏低，无降雨预报，提高土壤阈值（SET_SOIL 50）可让自动水泵在更湿时就开始浇水',
             'commands': [
-                {'type': 'threshold', 'sensorType': 'soil', 'value': 60, 'label': '土壤阈值→60%'}
+                {'type': 'threshold', 'sensorType': 'soil', 'value': 50, 'label': '土壤阈值→50%'}
             ]
         })
-
-    # 高温时建议提高温度阈值
+    
+    # --- 高温建议（调低温度阈值，让自动风扇提前启动，绝不调高） ---
     if max_temp >= 35:
         suggestions.append({
             'type': 'threshold',
-            'icon': '🌡️',
-            'suggestion': '明天高温，建议调高温度报警阈值',
-            'reason': f'预计最高 {max_temp:.1f}°C，提高温度阈值避免频繁报警',
+            'icon': '🔥',
+            'suggestion': '明天高温，建议调低风扇启动温度阈值，让自动风扇提前通风降温',
+            'reason': f'预计最高 {max_temp:.1f}°C，降低温度阈值（SET_TEMP 32）可使风扇在32°C时自动开启，比默认40°C更早降温',
             'commands': [
-                {'type': 'threshold', 'sensorType': 'temp', 'value': 38, 'label': '温度阈值→38°C'}
+                {'type': 'threshold', 'sensorType': 'temp', 'value': 32, 'label': '温度阈值→32°C'}
             ]
         })
-
-    # 低温时建议降低温度阈值
-    if min_temp <= 5:
+    elif max_temp >= 30:
         suggestions.append({
             'type': 'threshold',
             'icon': '🌡️',
-            'suggestion': '明天低温，建议调低温度报警阈值',
-            'reason': f'预计最低 {min_temp:.1f}°C，降低温度阈值避免低温误报',
+            'suggestion': '明天温度较高，建议适当调低风扇启动温度阈值，提前通风',
+            'reason': f'预计最高 {max_temp:.1f}°C，适当降低温度阈值（SET_TEMP 35）让风扇在35°C时自动开启',
             'commands': [
-                {'type': 'threshold', 'sensorType': 'temp', 'value': 3, 'label': '温度阈值→3°C'}
+                {'type': 'threshold', 'sensorType': 'temp', 'value': 35, 'label': '温度阈值→35°C'}
             ]
         })
-
+    
+    # --- 低温建议（调高温度阈值，避免风扇误开） ---
+    if min_temp <= 5:
+        suggestions.append({
+            'type': 'threshold',
+            'icon': '🥶',
+            'suggestion': '明天低温，建议调高风扇启动温度阈值，防止风扇自动开启',
+            'reason': f'预计最低 {min_temp:.1f}°C，提高温度阈值（SET_TEMP 45）可避免风扇在低温时自动开启',
+            'commands': [
+                {'type': 'threshold', 'sensorType': 'temp', 'value': 45, 'label': '温度阈值→45°C'}
+            ]
+        })
+    
+    # --- CO₂ 建议（利用舵机自动通风） ---
+    if co2_level > 600:
+        suggestions.append({
+            'type': 'device',
+            'icon': '🌬️',
+            'suggestion': 'CO₂浓度偏高，建议开启舵机自动通风模式',
+            'reason': f'当前CO₂ {co2_level}，执行 SERVO_AUTO 让舵机在CO₂超标时自动打开通风口',
+            'commands': [
+                {'device': 'motor', 'action': 'auto', 'label': '舵机自动模式'}
+            ]
+        })
+    elif co2_level > 400:
+        suggestions.append({
+            'type': 'device',
+            'icon': '🌬️',
+            'suggestion': 'CO₂略高，可开启舵机自动通风以改善空气质量',
+            'reason': f'当前CO₂ {co2_level}，建议开启舵机自动模式，超标时自动换气',
+            'commands': [
+                {'device': 'motor', 'action': 'auto', 'label': '舵机自动模式'}
+            ]
+        })
+    
     # --- 默认正常建议 ---
     if not suggestions:
         suggestions.append({
