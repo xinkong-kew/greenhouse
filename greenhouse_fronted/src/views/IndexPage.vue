@@ -297,7 +297,7 @@
 </template>
 
 <script setup>
-import { reactive, ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { reactive, ref, onMounted, onActivated, onDeactivated, onUnmounted, nextTick, watch } from 'vue'
 import socket from '../utils/socket.js'
 import Chart from 'chart.js/auto'
 import ChinaMapV2 from '../components/ChinaMapV2.vue'
@@ -838,6 +838,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   socket.off('realtime_update', handleRealtimeUpdate)
+  socket.off('device_status_update', handleDeviceStatusUpdate)
   socket.off('weather_update', handleWeatherUpdate)
   socket.off('chart_update', updateCharts)
   if (weatherPollTimer) {
@@ -846,6 +847,16 @@ onUnmounted(() => {
   }
   document.removeEventListener('keydown', onKeydown)
 })
+
+// 从缓存激活时重新请求数据（不刷新页面，只更新数据）
+onActivated(() => {
+  socket.emit('request_weather')
+  socket.emit('request_chart_data')
+  socket.emit('request_device_status')
+  monitorLoading.value = false  // 监控画面已缓存，无需重新加载
+})
+
+// 离开页面时不需要特殊处理，keep-alive 会自动缓存
 </script>
 
 <style scoped>
