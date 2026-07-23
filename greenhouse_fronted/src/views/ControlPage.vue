@@ -195,20 +195,20 @@ const deviceList = [
 ]
 
 const deviceStatus = reactive({
-  pump: false,
-  fan: false,
-  motor: false,
-  flame: false,   // 默认关闭
-  human: false    // 默认关闭
+  pump: true,    // 默认自动（与 Arduino pumpManual=false 一致）
+  fan: true,     // 默认自动（与 Arduino fanManualOverride=false 一致）
+  motor: false,  // 默认手动（与 Arduino servoAutoMode=false 一致）
+  flame: true,   // 默认自动（与 Arduino flameBeepMode=BEEP_AUTO 一致）
+  human: true    // 默认自动（与 Arduino humanBeepMode=BEEP_AUTO 一致）
 })
 
 // 设备是否处于自动模式（用于区分"自动"和"已开启"的显示）
 const deviceAutoMode = reactive({
   pump: true,
   fan: true,
-  motor: true,
-  flame: false,
-  human: false
+  motor: false,
+  flame: true,
+  human: true
 })
 
 const allAutoLoading = ref(false)
@@ -479,24 +479,13 @@ function queryThreshold(key) {
     })
 }
 
-function handleRealtimeUpdate(data) {
-  if (!data) return
-  if (data.pump_status != null) deviceStatus.pump = data.pump_status
-  if (data.fan_status != null) deviceStatus.fan = data.fan_status
-  if (data.motor_status != null) deviceStatus.motor = data.motor_status
-  if (data.flame_status != null) deviceStatus.flame = data.flame_status
-  if (data.human_status != null) deviceStatus.human = data.human_status
-}
-
 onMounted(() => {
-  socket.on('realtime_update', handleRealtimeUpdate)
   thresholdList.forEach(item => {
     thresholdValues[item.key] = item.default
   })
 })
 
 onUnmounted(() => {
-  socket.off('realtime_update', handleRealtimeUpdate)
 })
 </script>
 
