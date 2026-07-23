@@ -15,6 +15,10 @@ import re
 import mysql.connector
 import math
 from datetime import datetime
+import os
+
+# ==================== 本地命令文件（与 app_ultra_fast.py 共享） ====================
+CMD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'serial_cmd.json')
 
 # ==================== 配置 ====================
 # ADP-L610 4G 模块（HTTP 通信）
@@ -299,6 +303,51 @@ def send_control_command(ser_ctrl, device, action):
     return True
 
 
+def check_local_commands(ser_ctrl):
+    """检查本地命令文件（serial_cmd.json），处理待发送指令"""
+    try:
+        if not os.path.exists(CMD_FILE):
+            return
+        with open(CMD_FILE, 'r') as f:
+            content = f.read().strip()
+        if not content:
+            return
+        cmd_data = json.loads(content)
+        if cmd_data.get('pending') and cmd_data.get('cmd'):
+            cmd = cmd_data['cmd'].strip()
+            # 解析指令格式：HUMAN_OFF → device='human', action='off'
+            parts = cmd.split('_', 1)
+            if len(parts) == 2:
+                dev_name = parts[0].lower()
+                act_name = parts[1].lower()
+                # 水泵特殊处理：1/0/auto
+                if dev_name == '1':
+                    dev_name, act_name = 'pump', 'on'
+                elif dev_name == '0':
+                    dev_name, act_name = 'pump', 'off'
+                elif dev_name == 'auto':
+                    dev_name, act_name = 'pump', 'auto'
+                # 跳过 SET_xxx 指令（阈值指令由 sync_thresholds 处理）
+                if dev_name.startswith('set'):
+                    cmd_upper = cmd.upper()
+                    for th_type, prefix in THRESHOLD_CMD_MAP.items():
+                        if cmd_upper.startswith(prefix):
+                            value_str = cmd_upper[len(prefix):].strip()
+                            try:
+                                value = float(value_str)
+                                send_threshold_command(ser_ctrl, th_type, value)
+                            except ValueError:
+                                pass
+                            break
+                elif dev_name in DEVICE_CMD_MAP:
+                    send_control_command(ser_ctrl, dev_name, act_name)
+            # 清空命令文件
+            with open(CMD_FILE, 'w') as f:
+                json.dump({'cmd': '', 'pending': False}, f)
+    except Exception as e:
+        print(f"[本地命令] 处理失败: {e}")
+
+
 def send_threshold_command(ser_ctrl, th_type, value):
     """向控制板发送阈值设置指令"""
     if value is None:
@@ -515,7 +564,10 @@ def main():
                                 0,
                             )
 
-            # ===== 第二步：POST 发送传感器数据到服务器 =====
+            # ===== 第二步：检查本地命令文件（来自 Web 前端控制） =====
+            check_local_commands(ser_ctrl)
+
+            # ===== 第三步：POST 发送传感器数据到服务器 =====
             execute_post_sequence(ser_adp, sensor_data)
 
             # ===== 第三步：GET 读取服务器指令 =====
