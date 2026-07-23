@@ -699,6 +699,25 @@ def handle_request_weather():
             'enabled': status.get('enabled', True)
         })
 
+@socketio.on('set_city')
+def handle_set_city(city_name):
+    """客户端切换城市 - 通过 socket 直接设置城市并刷新天气"""
+    if not weather_agent or not city_name:
+        return
+    print(f"[天气] socket 切换城市: {city_name}", flush=True)
+    # 先更新城市名（即使天气刷新失败，城市名也变了）
+    weather_agent.set_city(city_name)
+    # 获取最新状态并推送
+    status = weather_agent.get_status()
+    emit('weather_update', {
+        'forecast': status.get('forecast'),
+        'current_advice': status.get('current_advice'),
+        'recent_decisions': status.get('recent_decisions', []),
+        'forecast_time': status.get('forecast_time'),
+        'enabled': status.get('enabled', True)
+    })
+    print(f"[天气] socket 切换完成: {city_name}", flush=True)
+
 @socketio.on('disconnect')
 def handle_disconnect():
     print('Client disconnected')
@@ -960,68 +979,74 @@ def api_tomorrow_suggestions():
     
     # --- 降雨建议（调整土壤阈值，让自动水泵适配） ---
     if heavy_rain:
+        suggested_soil = max(20, round(soil_moisture - 15))
         suggestions.append({
             'type': 'threshold',
             'icon': '⛈️',
-            'suggestion': '明天预计有大雨，建议调低土壤湿度阈值，避免自动浇水过湿',
-            'reason': f'大雨即将来临，自然降雨可补充水分，调低土壤阈值（SET_SOIL 30）让自动水泵在更干时才启动',
+            'suggestion': f'明天预计有大雨，建议调低土壤湿度阈值至 {suggested_soil}%，避免自动浇水过湿',
+            'reason': f'大雨即将来临，自然降雨可补充水分，调低土壤阈值（SET_SOIL {suggested_soil}）让自动水泵在更干时才启动',
             'commands': [
-                {'type': 'threshold', 'sensorType': 'soil', 'value': 30, 'label': '土壤阈值→30%'}
+                {'type': 'threshold', 'sensorType': 'soil', 'value': suggested_soil, 'label': f'土壤阈值→{suggested_soil}%'}
             ]
         })
     elif has_rain:
+        suggested_soil = max(25, round(soil_moisture - 10))
         suggestions.append({
             'type': 'threshold',
             'icon': '🌧️',
-            'suggestion': '明天预计有雨，建议适当调低土壤湿度阈值',
-            'reason': '有降雨预报，调低土壤阈值（SET_SOIL 40）可减少自动灌溉频率',
+            'suggestion': f'明天预计有雨，建议适当调低土壤湿度阈值至 {suggested_soil}%',
+            'reason': f'有降雨预报，调低土壤阈值（SET_SOIL {suggested_soil}）可减少自动灌溉频率',
             'commands': [
-                {'type': 'threshold', 'sensorType': 'soil', 'value': 40, 'label': '土壤阈值→40%'}
+                {'type': 'threshold', 'sensorType': 'soil', 'value': suggested_soil, 'label': f'土壤阈值→{suggested_soil}%'}
             ]
         })
     elif soil_moisture < 30:
         # 土壤干燥且无雨，建议提高土壤阈值，让自动水泵多浇水
+        suggested_soil = min(60, round(soil_moisture + 15))
         suggestions.append({
             'type': 'threshold',
             'icon': '💧',
-            'suggestion': '明天无雨且土壤偏干，建议调高土壤湿度阈值，让自动水泵增加灌溉',
-            'reason': f'土壤湿度 {soil_moisture:.0f}% 偏低，无降雨预报，提高土壤阈值（SET_SOIL 50）可让自动水泵在更湿时就开始浇水',
+            'suggestion': f'明天无雨且土壤偏干，建议调高土壤湿度阈值至 {suggested_soil}%，让自动水泵增加灌溉',
+            'reason': f'土壤湿度 {soil_moisture:.0f}% 偏低，无降雨预报，提高土壤阈值（SET_SOIL {suggested_soil}）可让自动水泵在更湿时就开始浇水',
             'commands': [
-                {'type': 'threshold', 'sensorType': 'soil', 'value': 50, 'label': '土壤阈值→50%'}
+                {'type': 'threshold', 'sensorType': 'soil', 'value': suggested_soil, 'label': f'土壤阈值→{suggested_soil}%'}
             ]
         })
     
     # --- 高温建议（调低温度阈值，让自动风扇提前启动，绝不调高） ---
     if max_temp >= 35:
+        suggested_temp = round(max(32, max_temp - 3))
         suggestions.append({
             'type': 'threshold',
             'icon': '🔥',
-            'suggestion': '明天高温，建议调低风扇启动温度阈值，让自动风扇提前通风降温',
-            'reason': f'预计最高 {max_temp:.1f}°C，降低温度阈值（SET_TEMP 32）可使风扇在32°C时自动开启，比默认40°C更早降温',
+            'suggestion': f'明天高温，建议调低风扇启动温度阈值至 {suggested_temp}°C，让自动风扇提前通风降温',
+            'reason': f'预计最高 {max_temp:.1f}°C，设置温度阈值（SET_TEMP {suggested_temp}）可使风扇在 {suggested_temp}°C 时自动开启，比默认40°C更早降温',
             'commands': [
-                {'type': 'threshold', 'sensorType': 'temp', 'value': 32, 'label': '温度阈值→32°C'}
+                {'type': 'threshold', 'sensorType': 'temp', 'value': suggested_temp, 'label': f'温度阈值→{suggested_temp}°C'}
             ]
         })
     elif max_temp >= 30:
+        suggested_temp = round(max(28, max_temp - 3))
         suggestions.append({
             'type': 'threshold',
             'icon': '🌡️',
-            'suggestion': '明天温度较高，建议适当调低风扇启动温度阈值，提前通风',
-            'reason': f'预计最高 {max_temp:.1f}°C，适当降低温度阈值（SET_TEMP 35）让风扇在35°C时自动开启',
+            'suggestion': f'明天温度较高，建议调低风扇启动温度阈值至 {suggested_temp}°C，让自动风扇在最热时段启动',
+            'reason': f'预计最高 {max_temp:.1f}°C，设置温度阈值（SET_TEMP {suggested_temp}）可使风扇在 {suggested_temp}°C 时自动开启，确保覆盖高温时段',
             'commands': [
-                {'type': 'threshold', 'sensorType': 'temp', 'value': 35, 'label': '温度阈值→35°C'}
+                {'type': 'threshold', 'sensorType': 'temp', 'value': suggested_temp, 'label': f'温度阈值→{suggested_temp}°C'}
             ]
         })
     
     # --- 低温建议（调高温度阈值，避免风扇误开） ---
     if min_temp <= 5:
+        suggested_temp = round(max(42, min_temp + 3))
         suggestions.append({
             'type': 'threshold',
             'icon': '🥶',
-            'suggestion': '明天低温，建议调高风扇启动温度阈值，防止风扇自动开启',
-            'reason': f'预计最低 {min_temp:.1f}°C，提高温度阈值（SET_TEMP 45）可避免风扇在低温时自动开启',
+            'suggestion': f'明天低温，建议调高风扇启动温度阈值至 {suggested_temp}°C，防止风扇自动开启',
+            'reason': f'预计最低 {min_temp:.1f}°C，提高温度阈值（SET_TEMP {suggested_temp}）可避免风扇在低温时自动开启',
             'commands': [
-                {'type': 'threshold', 'sensorType': 'temp', 'value': 45, 'label': '温度阈值→45°C'}
+                {'type': 'threshold', 'sensorType': 'temp', 'value': suggested_temp, 'label': f'温度阈值→{suggested_temp}°C'}
             ]
         })
     
@@ -1646,6 +1671,66 @@ def api_agent_refresh():
     success = weather_agent.update_forecast()
     return jsonify({'success': success, 'message': '天气已更新' if success else '更新失败'})
 
+@app.route('/api/agent/apply', methods=['POST'])
+def api_agent_apply():
+    """一键应用智能管家的今日决策建议（发送 SET_xxx 指令到 Arduino）"""
+    import re
+    if not weather_agent:
+        return jsonify({'success': False, 'error': '智能体未初始化'})
+    
+    # 获取当前决策列表
+    status = weather_agent.get_status()
+    all_decisions = status.get('decisions', [])
+    if not all_decisions:
+        # 尝试从 recent_decisions 获取
+        all_decisions = status.get('recent_decisions', [])
+    
+    if not all_decisions:
+        return jsonify({'success': False, 'error': '暂无决策建议', 'applied': []})
+    
+    # 从决策文本中提取可执行指令
+    commands = []
+    for d in all_decisions:
+        action = d.get('action', '')
+        # 提取 SET_xxx 数值 指令（如 SET_SOIL 30, SET_TEMP 32）
+        set_matches = re.findall(r'(SET_\w+)\s+(\d+(?:\.\d+)?)', action)
+        for cmd_name, val in set_matches:
+            commands.append(f"{cmd_name} {val}")
+        # 提取设备控制指令（如 FAN_AUTO, FAN_ON, FAN_OFF, SERVO_AUTO）
+        dev_matches = re.findall(r'\b(FAN_AUTO|FAN_ON|FAN_OFF|SERVO_AUTO|SERVO_0|SERVO_90|SERVO_180|auto)\b', action)
+        for cmd in dev_matches:
+            if cmd not in commands:
+                commands.append(cmd)
+    
+    if not commands:
+        return jsonify({'success': False, 'error': '未找到可执行的指令', 'applied': []})
+    
+    # 去重
+    commands = list(dict.fromkeys(commands))
+    
+    # 逐个发送指令
+    results = []
+    for cmd in commands:
+        try:
+            # 先尝试直接串口发送
+            ok = send_serial_command_direct(cmd)
+            if not ok:
+                # 回退到命令文件
+                with open(CMD_FILE, 'w') as f:
+                    json.dump({'cmd': cmd, 'pending': True}, f)
+                time.sleep(0.3)
+            results.append({'cmd': cmd, 'success': True})
+            print(f"[一键应用] 发送指令: {cmd}")
+        except Exception as e:
+            results.append({'cmd': cmd, 'success': False, 'error': str(e)})
+    
+    success_count = sum(1 for r in results if r['success'])
+    return jsonify({
+        'success': True,
+        'message': f'已应用 {success_count}/{len(commands)} 条指令',
+        'applied': results
+    })
+
 @app.route('/api/recent_data')
 def api_recent_data():
     """获取最近20分钟的传感器数据（用于首页迷你图表）"""
@@ -1945,9 +2030,9 @@ def init_app():
         # 兼容旧表：尝试添加可能缺失的列
         try:
             c = test_conn.cursor()
-            for col in ['co2']:
+            for col in ['co2', 'flame_status', 'human_status']:
                 try:
-                    c.execute(f"ALTER TABLE sensor_data ADD COLUMN {col} INT")
+                    c.execute(f"ALTER TABLE sensor_data ADD COLUMN {col} TINYINT(1) DEFAULT 0")
                     test_conn.commit()
                     print(f"✅ 已添加缺失的列: {col}")
                 except Exception:

@@ -59,6 +59,7 @@ class WeatherAgent:
         self.current_advice: Dict = {}      # 当前建议摘要
         self.enabled = True                 # 智能体是否启用
         self.lock = threading.Lock()
+        self._sensor_callback = None        # 传感器数据回调
 
     # ==================== 天气获取 ====================
 
@@ -219,60 +220,71 @@ class WeatherAgent:
         summary = forecast.get('summary', {})
         next_12h = forecast['forecast'][:4] if len(forecast['forecast']) >= 4 else forecast['forecast']
 
+        # 提前提取传感器数据，供后续所有决策使用
+        soil = sensor_data.get('latest_soil', 50) if sensor_data else 50
+        temp = sensor_data.get('latest_temp', 25) if sensor_data else 25
+        hum = sensor_data.get('latest_hum', 60) if sensor_data else 60
+        water = sensor_data.get('latest_water', 50) if sensor_data else 50
+        co2 = sensor_data.get('latest_co2', 400) if sensor_data else 400
+
         # --- 决策 1: 降雨判断（调整土壤阈值，让自动水泵适配天气） ---
         if summary.get('now_is_raining') or summary.get('heavy_rain'):
+            # 大雨时大幅降低土壤阈值，减少自动浇水
+            suggested_soil = max(20, round(soil - 15))
             decisions.append({
                 'time': datetime.now().strftime('%H:%M:%S'),
                 'level': 'warning',
                 'type': 'rain',
-                'action': '⛈️ 当前有雨/大雨预报，建议调低土壤湿度阈值（SET_SOIL 30），避免自动浇水过湿',
-                'reason': f'自然降雨可补充水分，降低土壤阈值可让自动水泵在更干时才启动'
+                'action': f'⛈️ 当前有雨/大雨预报，建议调低土壤湿度阈值（SET_SOIL {suggested_soil}），避免自动浇水过湿',
+                'reason': f'自然降雨可补充水分，降低土壤阈值至 {suggested_soil}% 可让自动水泵在更干时才启动'
             })
         elif summary.get('has_rain'):
+            # 小雨时适当降低土壤阈值
+            suggested_soil = max(25, round(soil - 10))
             decisions.append({
                 'time': datetime.now().strftime('%H:%M:%S'),
                 'level': 'info',
                 'type': 'rain',
-                'action': '🌧️ 未来12小时可能有雨，建议适当调低土壤湿度阈值（SET_SOIL 40）',
-                'reason': '预计有降雨，调低阈值可减少自动灌溉频率'
+                'action': f'🌧️ 未来12小时可能有雨，建议适当调低土壤湿度阈值（SET_SOIL {suggested_soil}）',
+                'reason': f'预计有降雨，调低阈值至 {suggested_soil}% 可减少自动灌溉频率'
             })
 
         # --- 决策 2: 高温判断（调低温度阈值，让自动风扇提前启动） ---
         if summary.get('extreme_high'):
+            max_t = summary["max_temp"]
+            suggested = round(max(32, max_t - 3))
             decisions.append({
                 'time': datetime.now().strftime('%H:%M:%S'),
                 'level': 'warning',
                 'type': 'temp',
-                'action': '🔥 高温预警，建议调低风扇启动温度阈值（SET_TEMP 32），并确保风扇处于自动模式（FAN_AUTO）',
-                'reason': f'预计最高 {summary["max_temp"]}°C，降低温度阈值可使风扇提前自动开启通风'
+                'action': f'🔥 高温预警，建议调低风扇启动温度阈值至 {suggested}°C（SET_TEMP {suggested}），并确保风扇处于自动模式（FAN_AUTO）',
+                'reason': f'预计最高 {max_t}°C，设置阈值 {suggested}°C 可使风扇提前自动开启通风'
             })
 
         # --- 决策 3: 低温判断（调高温度阈值，让风扇更晚启动） ---
         if summary.get('extreme_low'):
+            min_t = summary["min_temp"]
+            suggested = round(max(42, min_t + 3))
             decisions.append({
                 'time': datetime.now().strftime('%H:%M:%S'),
                 'level': 'warning',
                 'type': 'temp',
-                'action': '🥶 低温预警，建议调高风扇启动温度阈值（SET_TEMP 42），确保风扇不误开',
-                'reason': f'预计最低 {summary["min_temp"]}°C，提高温度阈值可避免风扇在低温时自动开启'
+                'action': f'🥶 低温预警，建议调高风扇启动温度阈值至 {suggested}°C（SET_TEMP {suggested}），确保风扇不误开',
+                'reason': f'预计最低 {min_t}°C，提高温度阈值至 {suggested}°C 可避免风扇在低温时自动开启'
             })
 
         # --- 决策 4: 结合当前传感器数据 ---
         if sensor_data:
-            soil = sensor_data.get('latest_soil', 50)
-            temp = sensor_data.get('latest_temp', 25)
-            hum = sensor_data.get('latest_hum', 60)
-            water = sensor_data.get('latest_water', 50)
-            co2 = sensor_data.get('latest_co2', 400)
-
             # 土壤湿度 + 天气综合判断（调整阈值，让自动水泵更智能）
             if soil < THRESHOLDS['soil_dry'] and not summary.get('has_rain'):
+                # 土壤干燥且无雨，提高阈值增加自动浇水频率
+                suggested_soil = min(60, round(soil + 15))
                 decisions.append({
                     'time': datetime.now().strftime('%H:%M:%S'),
                     'level': 'warning',
                     'type': 'soil',
-                    'action': '💧 土壤偏干且无雨，建议调高土壤湿度阈值（SET_SOIL 45），并确保水泵处于自动模式（auto）',
-                    'reason': f'土壤湿度 {soil}% 偏低，提高阈值可使自动水泵在更湿时就开始浇水'
+                    'action': f'💧 土壤偏干且无雨，建议调高土壤湿度阈值（SET_SOIL {suggested_soil}），并确保水泵处于自动模式（auto）',
+                    'reason': f'土壤湿度 {soil}% 偏低，提高阈值至 {suggested_soil}% 可使自动水泵在更湿时就开始浇水'
                 })
             elif soil < THRESHOLDS['soil_dry'] and summary.get('has_rain'):
                 decisions.append({
@@ -283,14 +295,15 @@ class WeatherAgent:
                     'reason': f'土壤湿度 {soil}% 偏低，但预报有雨，自动模式会配合降雨'
                 })
 
-            # 湿度判断（利用风扇排湿，通过调整湿度阈值）
+            # 湿度判断（利用风扇排湿，通过调整温度阈值让风扇运转）
             if hum > THRESHOLDS['hum_high']:
+                suggested_temp = max(28, round(temp - 2))
                 decisions.append({
                     'time': datetime.now().strftime('%H:%M:%S'),
                     'level': 'info',
                     'type': 'hum',
-                    'action': '💨 湿度过高，建议开启风扇（FAN_ON）或调低温度阈值（SET_TEMP 30）让自动风扇排湿',
-                    'reason': f'湿度 {hum}% 过高，风扇运转可促进空气流通降低湿度'
+                    'action': f'💨 湿度过高，建议开启风扇（FAN_ON）或调低温度阈值至 {suggested_temp}°C（SET_TEMP {suggested_temp}）让自动风扇排湿',
+                    'reason': f'湿度 {hum}% 过高，设置温度阈值 {suggested_temp}°C 可使风扇在接近当前温度时自动开启排湿'
                 })
 
             # 水位判断
@@ -431,7 +444,20 @@ class WeatherAgent:
         WEATHER_LAT = None
         WEATHER_LON = None
         print(f"[天气Agent] 切换城市至: {city_name}", flush=True)
-        return self.update_forecast()
+        # 先更新天气预报，成功后再清空旧决策
+        success = self.update_forecast()
+        if success:
+            print(f"[天气Agent] ✅ 切换 {city_name} 成功，重新生成决策", flush=True)
+            # 更新成功后清空旧决策（天气变了，旧决策不适用）
+            with self.lock:
+                self.decisions.clear()
+                self.current_advice = {}
+            # 用新天气数据重新生成决策
+            sensor_data = self._sensor_callback() if self._sensor_callback else None
+            self.run_decisions(sensor_data)
+        else:
+            print(f"[天气Agent] ⚠️ 切换 {city_name} 失败，请检查城市名", flush=True)
+        return success
 
     def get_current_city(self) -> str:
         """获取当前城市名"""
@@ -474,6 +500,7 @@ def agent_background_worker(agent: WeatherAgent, get_sensor_callback):
 def create_agent(get_sensor_callback=None, on_ready=None) -> WeatherAgent:
     """创建并启动天气智能体"""
     agent = WeatherAgent()
+    agent._sensor_callback = get_sensor_callback  # 存储回调，供 set_city 切换城市时使用
     if on_ready:
         agent._on_ready = on_ready
     

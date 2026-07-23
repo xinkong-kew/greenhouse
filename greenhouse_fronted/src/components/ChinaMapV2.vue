@@ -115,6 +115,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { getCityEnglish } from '../data/china_cities.js'
+import { chinaRegions } from '../data/china_cities.js'
 
 const props = defineProps({
   currentCity: { type: String, default: '' }
@@ -288,7 +289,16 @@ function onCityClick(feat) {
   const cityFull = feat.properties.name
   const cityName = getCityShortName(cityFull)
   const provShort = selectedProvinceName.value
-  const cityEn = getCityEnglish(provShort, cityName)
+  let cityEn = getCityEnglish(provShort, cityName)
+
+  // 如果城市名未在映射表中找到（返回了中文名），使用省份主城市（列表中第一个英文名）
+  if (/[\u4e00-\u9fff]/.test(cityEn) && cityEn === cityName) {
+    const province = chinaRegions.flatMap(r => r.provinces).find(p => p.name === provShort)
+    if (province && province.cities.length > 0) {
+      cityEn = province.cities[0] // 第一个是英文名（省会/首府）
+    }
+  }
+
   emit('select', { province: provShort, city: cityName, cityEn })
 }
 

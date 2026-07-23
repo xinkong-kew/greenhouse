@@ -191,6 +191,9 @@
           <button class="btn btn-sm btn-predict" @click="predictTomorrowAgent" :disabled="agentPredictLoading" style="margin-left:auto">
             🔮 {{ agentPredictResult ? '收起预测' : '明天预测' }}
           </button>
+          <button class="btn btn-sm btn-apply" @click="applyAgentDecisions" :disabled="applyLoading || agent.decisions.length === 0" style="margin-left:6px">
+            {{ applyLoading ? '⏳' : '✅' }} 一键应用
+          </button>
         </div>
 
         <!-- 明天天气预测（内联展开） -->
@@ -349,23 +352,9 @@ async function onCitySelect({ province, city, cityEn }) {
   weather.temp = '--'
   weather.desc = '加载中...'
   weather.icon = '🌤️'
-  try {
-    const res = await fetch('/api/weather/set_city', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ city: cityEn })
-    })
-    const data = await res.json()
-    if (data.success && data.forecast) {
-      // 直接使用API返回的天气数据更新界面
-      applyWeatherData(data.forecast, city)
-    } else {
-      // 备用：通过socket请求
-      setTimeout(() => socket.emit('request_weather'), 500)
-    }
-  } catch {
-    setTimeout(() => socket.emit('request_weather'), 500)
-  }
+  forecastList.value = []
+  // 通过 socket 直接切换城市（比 API 更可靠，失败时城市名也已更新）
+  socket.emit('set_city', cityEn || city)
 }
 
 // 直接应用天气数据到界面，不依赖socket事件
@@ -625,6 +614,7 @@ function refreshWeather() {
 // ===== 智能管家 - 明天天气预测 =====
 const agentPredictLoading = ref(false)
 const agentPredictResult = ref(null)
+const applyLoading = ref(false)
 
 async function predictTomorrowAgent() {
   // 如果已显示预测结果，再次点击则收起
@@ -644,6 +634,30 @@ async function predictTomorrowAgent() {
     // 静默处理
   }
   agentPredictLoading.value = false
+}
+
+async function applyAgentDecisions() {
+  if (applyLoading.value || agent.decisions.length === 0) return
+  applyLoading.value = true
+  try {
+    const res = await fetch('/api/agent/apply', { method: 'POST' })
+    const data = await res.json()
+    if (data.success) {
+      // 显示成功消息
+      chatMessages.value.push({
+        role: 'ai',
+        text: `✅ 一键应用完成：${data.message}`,
+        time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      })
+    }
+  } catch {
+    chatMessages.value.push({
+      role: 'ai',
+      text: '❌ 一键应用失败，请稍后重试',
+      time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    })
+  }
+  applyLoading.value = false
 }
 
 function scrollChat() {
@@ -1208,6 +1222,24 @@ onUnmounted(() => {
 .btn-predict:hover {
   background: rgba(0, 212, 255, 0.2);
   border-color: rgba(0, 212, 255, 0.35);
+}
+
+.btn-apply {
+  font-size: 11px;
+  padding: 3px 10px;
+  background: rgba(0, 255, 136, 0.1);
+  border-color: rgba(0, 255, 136, 0.2);
+  color: #00ff88;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.btn-apply:hover {
+  background: rgba(0, 255, 136, 0.2);
+  border-color: rgba(0, 255, 136, 0.35);
+}
+.btn-apply:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* ===== 作品线稿图预留区域 ===== */
