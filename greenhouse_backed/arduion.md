@@ -25,13 +25,13 @@
 #define BEEP_AUTO   2
 
 // 阈值变量
-float tempLimit = 40.0;
+float tempLimit = 30.0;        // 西红柿：超过30°C风扇开启降温
 int co2WarningThreshold = 700;
 const int waterTotalLength = 14;
 const unsigned int warmDelay = 2000;
-int soilThreshold = 34;    // 0~100（百分比）
+int soilThreshold = 60;        // 西红柿：土壤低于60%开始浇水（保持60-80%）
 bool pumpManual = false;
-float humiLimit = 70.0;
+float humiLimit = 80.0;        // 西红柿：超过80%湿度需排湿防病
 int waterLowThreshold = 20;
 
 byte flameBeepMode = BEEP_AUTO;

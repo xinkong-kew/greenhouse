@@ -345,15 +345,10 @@ def get_device_status_only():
             # 检查是否有状态变化
             status_changed = False
             for key in ['flame_detected', 'pump_status', 'fan_status', 'motor_status', 'buzzer_status']:
-                # 如果数据库值 ≠ 缓存值，说明有变化
                 if device_status_cache[key] != new_status[key]:
                     status_changed = True
-                    # 如果数据库返回 False 但缓存是 True，说明是 API 刚更新的状态但数据库还没同步
-                    # 此时保留缓存的值，不向下覆盖
-                    if new_status[key] is False and device_status_cache[key] is True:
-                        new_status[key] = True
             
-            # 更新缓存
+            # 更新缓存（以数据库为准）
             device_status_cache.update(new_status)
             
             return device_status_cache, status_changed
@@ -979,18 +974,18 @@ def api_tomorrow_suggestions():
     
     # --- 降雨建议（调整土壤阈值，让自动水泵适配） ---
     if heavy_rain:
-        suggested_soil = max(20, round(soil_moisture - 15))
+        suggested_soil = 20
         suggestions.append({
             'type': 'threshold',
             'icon': '⛈️',
             'suggestion': f'明天预计有大雨，建议调低土壤湿度阈值至 {suggested_soil}%，避免自动浇水过湿',
-            'reason': f'大雨即将来临，自然降雨可补充水分，调低土壤阈值（SET_SOIL {suggested_soil}）让自动水泵在更干时才启动',
+            'reason': f'大雨即将来临，自然降雨可补充水分，调低土壤阈值（SET_SOIL {suggested_soil}）让自动水泵在土壤很干时才开始启动',
             'commands': [
                 {'type': 'threshold', 'sensorType': 'soil', 'value': suggested_soil, 'label': f'土壤阈值→{suggested_soil}%'}
             ]
         })
     elif has_rain:
-        suggested_soil = max(25, round(soil_moisture - 10))
+        suggested_soil = 25
         suggestions.append({
             'type': 'threshold',
             'icon': '🌧️',
@@ -1000,7 +995,7 @@ def api_tomorrow_suggestions():
                 {'type': 'threshold', 'sensorType': 'soil', 'value': suggested_soil, 'label': f'土壤阈值→{suggested_soil}%'}
             ]
         })
-    elif soil_moisture < 30:
+    elif soil_moisture < 60:
         # 土壤干燥且无雨，建议提高土壤阈值，让自动水泵多浇水
         suggested_soil = min(60, round(soil_moisture + 15))
         suggestions.append({

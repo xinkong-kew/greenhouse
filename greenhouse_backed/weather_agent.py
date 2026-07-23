@@ -37,11 +37,11 @@ AGENT_DECISION_INTERVAL = 300       # 5分钟做一次决策
 
 # 传感器阈值（用于决策参考）
 THRESHOLDS = {
-    'temp_high': 35.0,              # 温度过高阈值
+    'temp_high': 30.0,              # 西红柿：超过30°C需降温
     'temp_low': 5.0,                # 温度过低阈值
-    'hum_high': 85.0,               # 湿度过高阈值
+    'hum_high': 80.0,               # 西红柿：超过80%湿度需排湿
     'hum_low': 30.0,                # 湿度过低阈值
-    'soil_dry': 30.0,               # 土壤干燥阈值
+    'soil_dry': 60.0,               # 西红柿：土壤低于60%需浇水
     'soil_wet': 80.0,               # 土壤过湿阈值
     'water_low': 20.0,              # 水位过低阈值
     'water_high': 90.0,             # 水位过高阈值
@@ -68,89 +68,107 @@ class WeatherAgent:
         if WEATHER_API_KEY == "YOUR_OPENWEATHERMAP_API_KEY":
             return None
 
-        try:
-            # 构建请求 URL
-            if WEATHER_LAT and WEATHER_LON:
-                url = (
-                    f"https://api.openweathermap.org/data/2.5/forecast"
-                    f"?lat={WEATHER_LAT}&lon={WEATHER_LON}"
-                    f"&appid={WEATHER_API_KEY}&units=metric&lang=zh_cn"
-                )
-            else:
-                url = (
-                    f"https://api.openweathermap.org/data/2.5/forecast"
-                    f"?q={WEATHER_CITY}"
-                    f"&appid={WEATHER_API_KEY}&units=metric&lang=zh_cn"
-                )
+        # 构建请求 URL
+        if WEATHER_LAT and WEATHER_LON:
+            url = (
+                f"https://api.openweathermap.org/data/2.5/forecast"
+                f"?lat={WEATHER_LAT}&lon={WEATHER_LON}"
+                f"&appid={WEATHER_API_KEY}&units=metric&lang=zh_cn"
+            )
+        else:
+            url = (
+                f"https://api.openweathermap.org/data/2.5/forecast"
+                f"?q={WEATHER_CITY}"
+                f"&appid={WEATHER_API_KEY}&units=metric&lang=zh_cn"
+            )
 
-            resp = requests.get(url, timeout=10)
-            if resp.status_code != 200:
-                print(f"[天气Agent] API 返回错误: {resp.status_code}", flush=True)
-                print(f"[天气Agent] 请求URL: {url}", flush=True)
-                print(f"[天气Agent] 响应内容: {resp.text[:200]}", flush=True)
-                
-                # 尝试带国家代码的城市名
-                if WEATHER_CITY and ',' not in WEATHER_CITY:
-                    print(f"[天气Agent] 尝试添加国家代码 CN...", flush=True)
-                    url_cn = (
-                        f"https://api.openweathermap.org/data/2.5/forecast"
-                        f"?q={WEATHER_CITY},CN"
-                        f"&appid={WEATHER_API_KEY}&units=metric&lang=zh_cn"
-                    )
-                    resp_cn = requests.get(url_cn, timeout=10)
+        # 网络请求超时/失败时自动重试（最多2次）
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                resp = requests.get(url, timeout=20)
+                if resp.status_code == 200:
+                    break  # 成功，跳出重试循环
+                if attempt < max_retries - 1:
+                    print(f"[天气Agent] API 返回 {resp.status_code}，重试第 {attempt+2} 次...", flush=True)
+                    time.sleep(2)
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    print(f"[天气Agent] 请求超时，重试第 {attempt+2} 次...", flush=True)
+                    time.sleep(2)
+                    continue
+                print(f"[天气Agent] 请求超时（已重试 {max_retries} 次）", flush=True)
+                return None
+            except requests.exceptions.ConnectionError:
+                if attempt < max_retries - 1:
+                    print(f"[天气Agent] 网络连接失败，重试第 {attempt+2} 次...", flush=True)
+                    time.sleep(2)
+                    continue
+                print(f"[天气Agent] 网络连接失败（已重试 {max_retries} 次）", flush=True)
+                return None
+
+        # 检查响应状态
+        if resp.status_code != 200:
+            print(f"[天气Agent] API 返回错误: {resp.status_code}", flush=True)
+            print(f"[天气Agent] 请求URL: {url}", flush=True)
+            print(f"[天气Agent] 响应内容: {resp.text[:200]}", flush=True)
+
+            # 尝试带国家代码的城市名
+            if WEATHER_CITY and ',' not in WEATHER_CITY:
+                print(f"[天气Agent] 尝试添加国家代码 CN...", flush=True)
+                url_cn = (
+                    f"https://api.openweathermap.org/data/2.5/forecast"
+                    f"?q={WEATHER_CITY},CN"
+                    f"&appid={WEATHER_API_KEY}&units=metric&lang=zh_cn"
+                )
+                try:
+                    resp_cn = requests.get(url_cn, timeout=20)
                     if resp_cn.status_code == 200:
                         print(f"[天气Agent] 使用 {WEATHER_CITY},CN 成功", flush=True)
                         resp = resp_cn
                     else:
                         print(f"[天气Agent] 添加CN后仍失败: {resp_cn.status_code}", flush=True)
                         return None
-                else:
+                except Exception:
+                    print(f"[天气Agent] 添加CN后仍失败: 请求异常", flush=True)
                     return None
+            else:
+                return None
 
-            data = resp.json()
+        data = resp.json()
 
-            # 解析为精简格式
-            forecast_list = []
-            for item in data.get('list', []):
-                forecast_list.append({
-                    'dt': item['dt'],
-                    'time': datetime.fromtimestamp(item['dt']).strftime('%m-%d %H:00'),
-                    'temp': round(item['main']['temp'], 1),
-                    'feels_like': round(item['main']['feels_like'], 1),
-                    'temp_min': round(item['main']['temp_min'], 1),
-                    'temp_max': round(item['main']['temp_max'], 1),
-                    'humidity': item['main']['humidity'],
-                    'pressure': item['main']['pressure'],
-                    'weather': item['weather'][0]['description'],
-                    'weather_code': item['weather'][0]['id'],
-                    'weather_main': item['weather'][0]['main'],
-                    'clouds': item['clouds']['all'],
-                    'wind_speed': item['wind']['speed'],
-                    'pop': item.get('pop', 0),          # 降雨概率 0-1
-                    'rain': item.get('rain', {}).get('3h', 0) if 'rain' in item else 0
-                })
+        # 解析为精简格式
+        forecast_list = []
+        for item in data.get('list', []):
+            forecast_list.append({
+                'dt': item['dt'],
+                'time': datetime.fromtimestamp(item['dt']).strftime('%m-%d %H:00'),
+                'temp': round(item['main']['temp'], 1),
+                'feels_like': round(item['main']['feels_like'], 1),
+                'temp_min': round(item['main']['temp_min'], 1),
+                'temp_max': round(item['main']['temp_max'], 1),
+                'humidity': item['main']['humidity'],
+                'pressure': item['main']['pressure'],
+                'weather': item['weather'][0]['description'],
+                'weather_code': item['weather'][0]['id'],
+                'weather_main': item['weather'][0]['main'],
+                'clouds': item['clouds']['all'],
+                'wind_speed': item['wind']['speed'],
+                'pop': item.get('pop', 0),          # 降雨概率 0-1
+                'rain': item.get('rain', {}).get('3h', 0) if 'rain' in item else 0
+            })
 
-            result = {
-                'city': data.get('city', {}).get('name', WEATHER_CITY),
-                'country': data.get('city', {}).get('country', ''),
-                'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'forecast': forecast_list[:16]  # 只保留2天（48小时/3小时间隔=16个点）
-            }
+        result = {
+            'city': data.get('city', {}).get('name', WEATHER_CITY),
+            'country': data.get('city', {}).get('country', ''),
+            'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'forecast': forecast_list[:16]  # 只保留2天（48小时/3小时间隔=16个点）
+        }
 
-            # 计算摘要
-            result['summary'] = self._calc_forecast_summary(forecast_list[:16])
+        # 计算摘要
+        result['summary'] = self._calc_forecast_summary(forecast_list[:16])
 
-            return result
-
-        except requests.exceptions.Timeout:
-            print("[天气Agent] 请求超时", flush=True)
-            return None
-        except requests.exceptions.ConnectionError:
-            print("[天气Agent] 网络连接失败", flush=True)
-            return None
-        except Exception as e:
-            print(f"[天气Agent] 获取天气错误: {e}", flush=True)
-            return None
+        return result
 
     def _calc_forecast_summary(self, forecast_list: List[Dict]) -> Dict:
         """计算天气预报摘要"""
@@ -219,6 +237,7 @@ class WeatherAgent:
 
         summary = forecast.get('summary', {})
         next_12h = forecast['forecast'][:4] if len(forecast['forecast']) >= 4 else forecast['forecast']
+        print(f"[决策调试] 天气摘要: now_is_raining={summary.get('now_is_raining')}, heavy_rain={summary.get('heavy_rain')}, has_rain={summary.get('has_rain')}, soil={sensor_data.get('latest_soil', 'N/A') if sensor_data else 'N/A'}", flush=True)
 
         # 提前提取传感器数据，供后续所有决策使用
         soil = sensor_data.get('latest_soil', 50) if sensor_data else 50
@@ -229,18 +248,19 @@ class WeatherAgent:
 
         # --- 决策 1: 降雨判断（调整土壤阈值，让自动水泵适配天气） ---
         if summary.get('now_is_raining') or summary.get('heavy_rain'):
-            # 大雨时大幅降低土壤阈值，减少自动浇水
-            suggested_soil = max(20, round(soil - 15))
+            # 大雨时设低土壤阈值（20%），让自动水泵在土壤很干时才启动，避免过度浇水
+            suggested_soil = 20
+            print(f"[决策调试] 大雨分支: suggested_soil = {suggested_soil}", flush=True)
             decisions.append({
                 'time': datetime.now().strftime('%H:%M:%S'),
                 'level': 'warning',
                 'type': 'rain',
-                'action': f'⛈️ 当前有雨/大雨预报，建议调低土壤湿度阈值（SET_SOIL {suggested_soil}），避免自动浇水过湿',
-                'reason': f'自然降雨可补充水分，降低土壤阈值至 {suggested_soil}% 可让自动水泵在更干时才启动'
+                'action': f'⛈️ 当前有雨/大雨预报，建议调低土壤湿度阈值至 {suggested_soil}%（SET_SOIL {suggested_soil}），避免自动浇水过湿',
+                'reason': f'自然降雨可补充水分，降低土壤阈值至 {suggested_soil}% 可让自动水泵在很干时才开始启动'
             })
         elif summary.get('has_rain'):
-            # 小雨时适当降低土壤阈值
-            suggested_soil = max(25, round(soil - 10))
+            # 小雨时设较低土壤阈值（25%），减少自动灌溉频率
+            suggested_soil = 25
             decisions.append({
                 'time': datetime.now().strftime('%H:%M:%S'),
                 'level': 'info',

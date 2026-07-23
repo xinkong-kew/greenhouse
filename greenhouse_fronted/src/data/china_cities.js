@@ -55,9 +55,9 @@ export const chinaRegions = [
     name: '西南',
     provinces: [
       { name: '重庆', cities: ['Chongqing', '重庆'] },
-      { name: '四川', cities: ['Chengdu', '成都', 'Mianyang', '绵阳', 'Deyang', '德阳', 'Leshan', '乐山', 'Zigong', '自贡', 'Panzhihua', '攀枝花', 'Luzhou', '泸州', 'Guangyuan', '广元', 'Suining', '遂宁', 'Neijiang', '内江', 'Ziyang', '资阳', 'Yibin', '宜宾', 'Nanchong', '南充', 'Dazhou', '达州', 'Yaan', '雅安', 'Guangan', '广安', 'Bazhong', '巴中', 'Meishan', '眉山', 'Xichang', '凉山'] },
-      { name: '贵州', cities: ['Guiyang', '贵阳', 'Zunyi', '遵义', 'Anshun', '安顺', 'Kaili', '凯里', 'Liping', '黎平', 'Liupanshui', '六盘水', 'Bijie', '毕节', 'Tongren', '铜仁'] },
-      { name: '云南', cities: ['Kunming', '昆明', 'Dali', '大理', 'Lijiang', '丽江', 'Jinghong', '西双版纳', 'Qujing', '曲靖', 'Yuxi', '玉溪', 'Baoshan', '保山', 'Zhaotong', '昭通', 'Pu\'er', '普洱', 'Lincang', '临沧', 'Chuxiong', '楚雄', 'Gejiu', '红河', 'Wenshan', '文山', 'Dehong', '德宏', 'Shangri-La', '迪庆'] },
+      { name: '四川', cities: ['Chengdu', '成都', 'Mianyang', '绵阳', 'Deyang', '德阳', 'Leshan', '乐山', 'Zigong', '自贡', 'Panzhihua', '攀枝花', 'Luzhou', '泸州', 'Guangyuan', '广元', 'Suining', '遂宁', 'Neijiang', '内江', 'Ziyang', '资阳', 'Yibin', '宜宾', 'Nanchong', '南充', 'Dazhou', '达州', 'Yaan', '雅安', 'Guangan', '广安', 'Bazhong', '巴中', 'Meishan', '眉山', 'Xichang', '凉山', 'Kangding', '甘孜', 'Barkam', '阿坝'] },
+      { name: '贵州', cities: ['Guiyang', '贵阳', 'Zunyi', '遵义', 'Anshun', '安顺', 'Kaili', '凯里', 'Liping', '黎平', 'Liupanshui', '六盘水', 'Bijie', '毕节', 'Tongren', '铜仁', 'Duyun', '黔南', 'Xingyi', '黔西南'] },
+      { name: '云南', cities: ['Kunming', '昆明', 'Dali', '大理', 'Lijiang', '丽江', 'Jinghong', '西双版纳', 'Qujing', '曲靖', 'Yuxi', '玉溪', 'Baoshan', '保山', 'Zhaotong', '昭通', 'Pu\'er', '普洱', 'Lincang', '临沧', 'Chuxiong', '楚雄', 'Gejiu', '红河', 'Wenshan', '文山', 'Dehong', '德宏', 'Shangri-La', '迪庆', 'Lushui', '怒江'] },
       { name: '西藏', cities: ['Lhasa', '拉萨', 'Shigatse', '日喀则', 'Nyingchi', '林芝', 'Lhasa', '那曲', 'Shigatse', '阿里', 'Qamdo', '昌都', 'Shannan', '山南'] }
     ]
   },

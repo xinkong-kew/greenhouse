@@ -161,9 +161,17 @@ function getProvinceFullName(short) {
   return short
 }
 
-// 城市名简化（去掉"市"后缀）
+// 城市名简化（去掉"市/地区/自治州/盟"等后缀，保留纯地名）
 function getCityShortName(name) {
-  return name ? name.replace(/市$/, '').replace(/地区$/, '').replace(/自治州$/, '州').replace(/盟$/, '') : ''
+  if (!name) return ''
+  let n = name
+  n = n.replace(/市$/, '')
+  n = n.replace(/地区$/, '')
+  // 自治州: 凉山彝族自治州 → 凉山, 大理白族自治州 → 大理
+  n = n.replace(/[藏回苗彝侗壮傣黎白族土家族羌族蒙古族哈萨克族满族朝鲜族畲族瑶族]+自治州$/, '')
+  n = n.replace(/自治州$/, '')
+  n = n.replace(/盟$/, '')
+  return n
 }
 
 // ===== 投影函数 =====

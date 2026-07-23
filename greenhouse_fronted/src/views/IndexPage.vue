@@ -730,6 +730,16 @@ function handleRealtimeUpdate(data) {
   if (data.human_status != null) devices.human.state = data.human_status
 }
 
+function handleDeviceStatusUpdate(data) {
+  if (!data) return
+  if (data.pump_status != null) devices.pump.state = data.pump_status
+  if (data.fan_status != null) devices.fan.state = data.fan_status
+  if (data.motor_status != null) devices.motor.state = data.motor_status
+  if (data.buzzer_status != null) devices.buzzer = data.buzzer_status
+  // 火焰检测状态
+  if (data.flame_detected != null) devices.flame.state = data.flame_detected
+}
+
 function handleWeatherUpdate(data) {
   if (!data) return
   const fc = data.forecast || {}
@@ -795,10 +805,12 @@ function onKeydown(e) {
 
 onMounted(async () => {
   socket.on('realtime_update', handleRealtimeUpdate)
+  socket.on('device_status_update', handleDeviceStatusUpdate)
   socket.on('weather_update', handleWeatherUpdate)
   socket.on('chart_update', updateCharts)
   socket.emit('request_weather')
   socket.emit('request_chart_data')
+  socket.emit('request_device_status')
   // 初始渲染图表框架（无数据时显示空坐标轴）
   nextTick(renderCharts)
   fetchChartData()
