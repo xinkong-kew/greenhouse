@@ -2104,7 +2104,7 @@ def init_app():
         # 兼容旧表：尝试添加可能缺失的列
         try:
             c = test_conn.cursor()
-            for col in ['co2', 'flame_status', 'human_status']:
+            for col in ['co2', 'flame_status', 'human_status', 'human_detected']:
                 try:
                     c.execute(f"ALTER TABLE sensor_data ADD COLUMN {col} TINYINT(1) DEFAULT 0")
                     test_conn.commit()
