@@ -35,7 +35,7 @@ DB_PASSWORD = os.getenv('DB_PASSWORD', 'hyqiuyu45')
 DB_NAME = os.getenv('DB_NAME', 'sensor_db')
 
 # 阿里云百炼 AI 配置
-DASHSCOPE_API_KEY = os.getenv('DASHSCOPE_API_KEY', 'sk-323c8937b04841b983cee01f92d37d50')
+DASHSCOPE_API_KEY = os.getenv('DASHSCOPE_API_KEY', 'sk-ws-H.EERYEDD.xDtx.MEYCIQDvApTbN7_Fj8of_-s1XrN2SJBnpitA1tjL6aIihtOJtQIhAJF64pZa3MQGI3Q-S0KYrgyd5ogJUA27pQQxvaGl_mfP')
 DASHSCOPE_BASE_URL = os.getenv('DASHSCOPE_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
 DASHSCOPE_MODEL = os.getenv('DASHSCOPE_MODEL', 'deepseek-v4-flash')
 
@@ -53,7 +53,7 @@ app = Flask(__name__,
     template_folder=FRONTEND_DIST,
     static_folder=os.path.join(FRONTEND_DIST, 'assets'),
     static_url_path='/assets')
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'sk-ws-H.EERYRXD.kTfS.MEYCIQCK7a11x-Ag4dy0LvvTjs8cyhgOqJP0qe_cCRm06o8XTwIhAIAyiJyQIFy5DyS2XqqAW-SYsnsuEOFmLJQiFdaQIAQw')
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 socketio = SocketIO(app, cors_allowed_origins="*")
 
