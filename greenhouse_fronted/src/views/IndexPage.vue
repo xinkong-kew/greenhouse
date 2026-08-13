@@ -398,7 +398,7 @@ const chatLoading = ref(false)
 const chatRef = ref(null)
 
 // ===== 监控画面 =====
-const monitorUrl = ref('http://10.116.27.43')
+const monitorUrl = ref('http://10.194.121.43')
 const monitorLoading = ref(true)
 
 // ===== 常用问题快捷按钮 =====
@@ -695,6 +695,14 @@ async function sendChatMessage() {
   scrollChat()
 }
 
+// ===== 工具函数：计算警报设备是否触发（蜂鸣器在响 = 报警） =====
+// 蜂鸣器响的条件：模式=开启 或 (模式=自动 且 传感器检测到)
+function calcAlarmState(action, detected) {
+  if (action === 'on') return true
+  if (action === 'auto' && detected) return true
+  return false
+}
+
 // ===== REST API 轮询回退（当 Socket.IO 连接不可用时） =====
 let weatherPollTimer = null
 let deviceStatusPollTimer = null
@@ -710,9 +718,18 @@ async function fetchDeviceStatus() {
       if (d.pump_status != null) devices.pump.state = d.pump_status
       if (d.fan_status != null) devices.fan.state = d.fan_status
       if (d.motor_status != null) devices.motor.state = d.motor_status
-      if (d.flame_status != null) devices.flame.state = d.flame_status
-      // 安防警报：检测到人体时亮起
-      if (d.human_detected != null) devices.human.state = d.human_detected
+      // 火焰警报：蜂鸣器响才亮（模式=开启 或 模式=自动且检测到火焰）
+      if (d.flame_action != null && d.flame_detected != null) {
+        devices.flame.state = calcAlarmState(d.flame_action, d.flame_detected)
+      } else if (d.flame_detected != null) {
+        devices.flame.state = d.flame_detected
+      }
+      // 安防警报：蜂鸣器响才亮（模式=开启 或 模式=自动且检测到人体）
+      if (d.human_action != null && d.human_detected != null) {
+        devices.human.state = calcAlarmState(d.human_action, d.human_detected)
+      } else if (d.human_detected != null) {
+        devices.human.state = d.human_detected
+      }
       // 更新模式（auto/on/off）
       if (d.pump_action != null) devices.pump.action = d.pump_action
       if (d.fan_action != null) devices.fan.action = d.fan_action
@@ -753,9 +770,18 @@ function handleRealtimeUpdate(data) {
   if (data.pump_status != null) devices.pump.state = data.pump_status
   if (data.fan_status != null) devices.fan.state = data.fan_status
   if (data.motor_status != null) devices.motor.state = data.motor_status
-  if (data.flame_status != null) devices.flame.state = data.flame_status
-  // 安防警报：检测到人体时亮起
-  if (data.human_detected != null) devices.human.state = data.human_detected
+  // 火焰警报：蜂鸣器响才亮（有 action 时精确计算，否则用检测值）
+  if (data.flame_action != null && data.flame_detected != null) {
+    devices.flame.state = calcAlarmState(data.flame_action, data.flame_detected)
+  } else if (data.flame_detected != null) {
+    devices.flame.state = data.flame_detected
+  }
+  // 安防警报：蜂鸣器响才亮（有 action 时精确计算，否则用检测值）
+  if (data.human_action != null && data.human_detected != null) {
+    devices.human.state = calcAlarmState(data.human_action, data.human_detected)
+  } else if (data.human_detected != null) {
+    devices.human.state = data.human_detected
+  }
 }
 
 function handleDeviceStatusUpdate(data) {
@@ -763,9 +789,18 @@ function handleDeviceStatusUpdate(data) {
   if (data.pump_status != null) devices.pump.state = data.pump_status
   if (data.fan_status != null) devices.fan.state = data.fan_status
   if (data.motor_status != null) devices.motor.state = data.motor_status
-  if (data.flame_status != null) devices.flame.state = data.flame_status
-  // 安防警报：检测到人体时亮起
-  if (data.human_detected != null) devices.human.state = data.human_detected
+  // 火焰警报：蜂鸣器响才亮
+  if (data.flame_action != null && data.flame_detected != null) {
+    devices.flame.state = calcAlarmState(data.flame_action, data.flame_detected)
+  } else if (data.flame_detected != null) {
+    devices.flame.state = data.flame_detected
+  }
+  // 安防警报：蜂鸣器响才亮
+  if (data.human_action != null && data.human_detected != null) {
+    devices.human.state = calcAlarmState(data.human_action, data.human_detected)
+  } else if (data.human_detected != null) {
+    devices.human.state = data.human_detected
+  }
   // 更新设备模式（auto/on/off）
   if (data.pump_action != null) devices.pump.action = data.pump_action
   if (data.fan_action != null) devices.fan.action = data.fan_action

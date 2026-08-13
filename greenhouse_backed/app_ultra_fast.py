@@ -585,6 +585,11 @@ def fast_sensor_monitor():
                     pass
                 
                 # 推送完整实时数据（兼容）
+                combined_data['pump_action'] = device_action_cache.get('pump', 'off')
+                combined_data['fan_action'] = device_action_cache.get('fan', 'off')
+                combined_data['motor_action'] = device_action_cache.get('motor', 'off')
+                combined_data['flame_action'] = device_action_cache.get('flame', 'off')
+                combined_data['human_action'] = device_action_cache.get('human', 'off')
                 socketio.emit('realtime_update', combined_data)
                 
                 last_timestamp = sensor_data['timestamp']
@@ -1370,10 +1375,15 @@ def api_device_control():
     # 根据 Arduino 指令格式生成命令
     # 风扇: FAN_ON, FAN_OFF, FAN_AUTO
     # 水泵: 1(开), 0(关), auto(自动)
+    # 舵机: SERVO_180(开), SERVO_0(关), SERVO_AUTO(自动)
     # 火焰/人体: FLAME_ON/OFF/AUTO, HUMAN_ON/OFF/AUTO
     if device == 'pump':
         # 水泵特殊处理：1=开, 0=关, auto=自动
         cmd_map = {'on': '1', 'off': '0', 'auto': 'auto'}
+        cmd = cmd_map.get(action, action)
+    elif device == 'motor':
+        # 舵机：SERVO_180=开, SERVO_0=关, SERVO_AUTO=自动
+        cmd_map = {'on': 'SERVO_180', 'off': 'SERVO_0', 'auto': 'SERVO_AUTO'}
         cmd = cmd_map.get(action, action)
     else:
         # 其他设备全部大写: FAN_ON, FLAME_AUTO, etc.

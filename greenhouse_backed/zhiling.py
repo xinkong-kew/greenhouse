@@ -128,6 +128,15 @@ def ensure_table(conn):
             )
         """)
         conn.commit()
+        # 兼容旧表：尝试添加可能缺失的列
+        for col in ['co2', 'flame_status', 'human_status', 'human_detected']:
+            try:
+                col_type = 'INT' if col in ('co2',) else 'TINYINT(1) DEFAULT 0'
+                c.execute(f"ALTER TABLE sensor_data ADD COLUMN {col} {col_type}")
+                conn.commit()
+                print(f"✅ 已添加缺失的列: {col}")
+            except Exception:
+                pass  # 列已存在，忽略
         c.close()
     except Exception as e:
         print(f"[数据库] 建表失败: {e}")
@@ -244,10 +253,10 @@ def read_sensor_line(ser_ctrl):
             # 土壤（Arduino 已映射为百分比，直接使用）
             soil_percent = max(0, min(100, soil_raw))
 
-            # 火焰：level==0 表示检测到火焰
+            # 火焰：level==0 表示检测到火焰（火焰传感器输出 LOW=0 表示有火）
             flame_detected = 1 if (flame_level == 0) else 0
-            # 人体：level==0 表示检测到人体
-            human_detected = 1 if (human_level == 0) else 0
+            # 人体：level!=0 表示检测到人体（PIR 传感器输出 HIGH=1 表示有人）
+            human_detected = 1 if (human_level != 0) else 0
 
             print(f"  [传感器] 温度={temperature:.1f}℃ 湿度={humidity:.1f}% "
                   f"土壤={soil_percent:.1f}% 水位={water_percent:.1f}% "
@@ -278,9 +287,29 @@ THRESHOLD_SUMMARY_PATTERN = re.compile(
     r'阈值汇总:.*?风扇=(\S+)\s+水泵=(\S+)\s+舵机=(\S+)\s+火焰=(\S+)\s+人体=(\S+)'
 )
 
+# 阈值数值正则
+THRESHOLD_VALUES_PATTERN = re.compile(
+    r'阈值汇总:.*?温度=([\d.]+)C\s+湿度=([\d.]+)%\s+土壤=(\d+)%\s+CO2=(\d+)\s+水位=(\d+)%'
+)
+
+# 阈值数值缓存
+THRESHOLD_VALUES = {'temp': 30.0, 'hum': 80.0, 'soil': 60, 'co2': 700, 'water': 20}
+
+# 上次传感器数据缓存（用于推断自动模式下设备状态）
+LAST_SENSOR = {'soil': 50, 'temp': 25, 'co2': 400}
+
 
 def parse_arduino_status(line):
     """从 Arduino 阈值汇总行解析设备实际状态，更新 CURRENT_DEVICE_STATE"""
+    # 先解析阈值数值
+    tv = THRESHOLD_VALUES_PATTERN.search(line)
+    if tv:
+        THRESHOLD_VALUES['temp'] = float(tv.group(1))
+        THRESHOLD_VALUES['hum'] = float(tv.group(2))
+        THRESHOLD_VALUES['soil'] = int(tv.group(3))
+        THRESHOLD_VALUES['co2'] = int(tv.group(4))
+        THRESHOLD_VALUES['water'] = int(tv.group(5))
+    
     m = THRESHOLD_SUMMARY_PATTERN.search(line)
     if not m:
         return False
@@ -292,20 +321,36 @@ def parse_arduino_status(line):
     flame_status = m.group(4)
     human_status = m.group(5)
 
-    # 所有设备统一处理：自动/开启/关闭
+    # 火焰/人体使用标准映射
     mode_map = {'自动': 'auto', '开启': 'on', '关闭': 'off'}
-    if fan_status in mode_map:
-        CURRENT_DEVICE_STATE['fan'] = mode_map[fan_status]
-    if pump_status in mode_map:
-        CURRENT_DEVICE_STATE['pump'] = mode_map[pump_status]
-    if motor_status in mode_map:
-        CURRENT_DEVICE_STATE['motor'] = mode_map[motor_status]
     if flame_status in mode_map:
         CURRENT_DEVICE_STATE['flame'] = mode_map[flame_status]
     if human_status in mode_map:
         CURRENT_DEVICE_STATE['human'] = mode_map[human_status]
 
-    print(f"  [Arduino状态] 风扇={fan_status} 水泵={pump_status} 舵机={motor_status} 火焰={flame_status} 人体={human_status}")
+    # 风扇/水泵/舵机：推断实际状态
+    # 自动模式下根据传感器数据推断是否开启
+    soil_m = LAST_SENSOR.get('soil', 50)
+    temp_c = LAST_SENSOR.get('temp', 25)
+    co2_v = LAST_SENSOR.get('co2', 400)
+    
+    if fan_status == '自动':
+        CURRENT_DEVICE_STATE['fan'] = 'on' if temp_c > THRESHOLD_VALUES['temp'] else 'off'
+    elif fan_status in mode_map:
+        CURRENT_DEVICE_STATE['fan'] = mode_map[fan_status]
+    
+    if pump_status == '自动':
+        CURRENT_DEVICE_STATE['pump'] = 'on' if soil_m < THRESHOLD_VALUES['soil'] else 'off'
+    elif pump_status in mode_map:
+        CURRENT_DEVICE_STATE['pump'] = mode_map[pump_status]
+    
+    if motor_status == '自动':
+        CURRENT_DEVICE_STATE['motor'] = 'on' if co2_v > THRESHOLD_VALUES['co2'] else 'off'
+    elif motor_status in mode_map:
+        CURRENT_DEVICE_STATE['motor'] = mode_map[motor_status]
+
+    print(f"  [Arduino状态] 风扇={fan_status}({CURRENT_DEVICE_STATE['fan']}) 水泵={pump_status}({CURRENT_DEVICE_STATE['pump']}) 舵机={motor_status}({CURRENT_DEVICE_STATE['motor']}) 火焰={flame_status} 人体={human_status}")
+    print(f"  [阈值] 温度={THRESHOLD_VALUES['temp']}C 土壤={THRESHOLD_VALUES['soil']}% CO2={THRESHOLD_VALUES['co2']}")
     
     # 写入共享文件（供 app_ultra_fast.py 读取）
     _write_device_state_to_file()
@@ -382,6 +427,18 @@ def check_local_commands(ser_ctrl):
                             break
                 elif dev_name in DEVICE_CMD_MAP:
                     send_control_command_local(ser_ctrl, dev_name, act_name)
+                # 舵机指令特殊处理：SERVO_180 → motor on
+                elif dev_name == 'servo':
+                    # 映射 servo → motor
+                    action_map = {'180': 'on', '0': 'off', 'auto': 'auto'}
+                    mapped_action = action_map.get(act_name)
+                    if mapped_action:
+                        send_control_command_local(ser_ctrl, 'motor', mapped_action)
+                    else:
+                        # 其他角度指令（如 SERVO_90），直接发送到串口
+                        ser_ctrl.write((cmd + '\n').encode('utf-8'))
+                        print(f"[控制] 🔧 舵机 → {act_name}° (指令: {cmd}) → {SERIAL_PORT_CTRL}")
+                        time.sleep(0.3)
             # 清空命令文件
             with open(CMD_FILE, 'w') as f:
                 json.dump({'cmd': '', 'pending': False}, f)
@@ -410,6 +467,25 @@ def send_threshold_command(ser_ctrl, th_type, value):
 
 # ==================== HTTP 通信序列 ====================
 
+
+def get_device_inferred_state(device_name, sensor_data):
+    """获取设备推断状态：auto模式下根据传感器数据推断实际开关状态
+    
+    Returns: 1 (开启) 或 0 (关闭)
+    """
+    state = CURRENT_DEVICE_STATE.get(device_name, 'off')
+    if state == 'auto':
+        if device_name == 'pump':
+            soil_m = sensor_data.get('soil', 50) if sensor_data else LAST_SENSOR.get('soil', 50)
+            return 1 if soil_m < THRESHOLD_VALUES.get('soil', 60) else 0
+        elif device_name == 'fan':
+            temp_c = sensor_data.get('temp', 25) if sensor_data else LAST_SENSOR.get('temp', 25)
+            return 1 if temp_c > THRESHOLD_VALUES.get('temp', 30) else 0
+        elif device_name == 'motor':
+            co2_v = sensor_data.get('co2', 400) if sensor_data else LAST_SENSOR.get('co2', 400)
+            return 1 if co2_v > THRESHOLD_VALUES.get('co2', 700) else 0
+    return 1 if state == 'on' else 0
+
 def execute_post_sequence(ser_adp, sensor_data):
     """执行 POST 数据发送序列，使用真实传感器数据"""
     if not sensor_data:
@@ -424,9 +500,9 @@ def execute_post_sequence(ser_adp, sensor_data):
         'water': sensor_data.get('water', 0),
         'co2': sensor_data.get('co2', 0),
         'flame': sensor_data.get('flame', 0),
-        'pump': 1 if CURRENT_DEVICE_STATE.get('pump') in ('on', 'auto') else 0,
-        'fan': 1 if CURRENT_DEVICE_STATE.get('fan') in ('on', 'auto') else 0,
-        'motor': 1 if CURRENT_DEVICE_STATE.get('motor') in ('on', 'auto') else 0,
+        'pump': get_device_inferred_state('pump', sensor_data),
+        'fan': get_device_inferred_state('fan', sensor_data),
+        'motor': get_device_inferred_state('motor', sensor_data),
     }
     json_str = json.dumps(payload, ensure_ascii=False)
     data_len = len(json_str.encode('utf-8'))
@@ -584,9 +660,9 @@ def main():
                         sensor_data.get('co2', 0),
                         sensor_data.get('flame', 0),
                         sensor_data.get('human', 0),  # human_detected
-                        1 if CURRENT_DEVICE_STATE.get('pump') in ('on', 'auto') else 0,
-                        1 if CURRENT_DEVICE_STATE.get('fan') in ('on', 'auto') else 0,
-                        1 if CURRENT_DEVICE_STATE.get('motor') in ('on', 'auto') else 0,
+                        get_device_inferred_state('pump', sensor_data),
+                        get_device_inferred_state('fan', sensor_data),
+                        get_device_inferred_state('motor', sensor_data),
                         0,  # buzzer 始终为 0
                     )
                     if not ok:
@@ -607,9 +683,9 @@ def main():
                                 sensor_data.get('co2', 0),
                                 sensor_data.get('flame', 0),
                                 sensor_data.get('human', 0),  # human_detected
-                                1 if CURRENT_DEVICE_STATE.get('pump') in ('on', 'auto') else 0,
-                                1 if CURRENT_DEVICE_STATE.get('fan') in ('on', 'auto') else 0,
-                                1 if CURRENT_DEVICE_STATE.get('motor') in ('on', 'auto') else 0,
+                                get_device_inferred_state('pump', sensor_data),
+                                get_device_inferred_state('fan', sensor_data),
+                                get_device_inferred_state('motor', sensor_data),
                                 0,
                             )
 

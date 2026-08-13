@@ -62,6 +62,27 @@ THRESHOLD_PATTERN = re.compile(
     r'阈值汇总:.*?风扇=(\S+)\s+水泵=(\S+)\s+舵机=(\S+)\s+火焰=(\S+)\s+人体=(\S+)'
 )
 
+# 阈值数值正则（提取温度/湿度/土壤/CO2/水位阈值）
+THRESHOLD_VALUES_PATTERN = re.compile(
+    r'阈值汇总:.*?温度=([\d.]+)C\s+湿度=([\d.]+)%\s+土壤=(\d+)%\s+CO2=(\d+)\s+水位=(\d+)%'
+)
+
+# 阈值数值缓存（由阈值汇总行解析更新，用于推断自动模式下设备状态）
+THRESHOLD_VALUES = {
+    'temp': 30.0,
+    'hum': 80.0,
+    'soil': 60,
+    'co2': 700,
+    'water': 20,
+}
+
+# 上次传感器数据缓存（用于推断自动模式下设备状态）
+LAST_SENSOR = {
+    'soil_moisture': 50,
+    'temperature': 25,
+    'co2': 400,
+}
+
 
 def find_arduino_port():
     """查找 Arduino 串口（支持环境变量 SERIAL_PORT 覆盖）"""
@@ -200,8 +221,10 @@ def send_cmd(ser):
                 DEVICE_STATES['pump'] = False
                 print(f"   → 设备状态更新: pump = False")
             elif cmd_name.lower() == 'auto':
-                DEVICE_STATES['pump'] = True
-                print(f"   → 设备状态更新: pump = True (auto)")
+                # 自动模式下根据土壤湿度推断实际状态
+                soil_m = LAST_SENSOR.get('soil_moisture', 50)
+                DEVICE_STATES['pump'] = (soil_m < THRESHOLD_VALUES['soil'])
+                print(f"   → 设备状态更新: pump = {DEVICE_STATES['pump']} (auto, soil={soil_m}, threshold={THRESHOLD_VALUES['soil']})")
             elif '_' in cmd_name and not cmd_name.startswith('SET'):
                 dev_name, dev_action = cmd_name.split('_', 1)
                 dev_name_lower = dev_name.lower()
@@ -211,8 +234,26 @@ def send_cmd(ser):
                 if dev_name_lower in DEVICE_STATES:
                     if dev_action.lower() == 'off':
                         DEVICE_STATES[dev_name_lower] = False
-                    elif dev_action.lower() in ('on', 'auto', 'manual'):
-                        DEVICE_STATES[dev_name_lower] = (dev_action.lower() != 'manual')
+                    elif dev_action.lower() == 'auto':
+                        # 自动模式下根据传感器数据推断实际状态
+                        if dev_name_lower == 'fan':
+                            temp_c = LAST_SENSOR.get('temperature', 25)
+                            DEVICE_STATES[dev_name_lower] = (temp_c > THRESHOLD_VALUES['temp'])
+                            print(f"   → 设备状态更新: {dev_name_lower} = {DEVICE_STATES[dev_name_lower]} (auto, temp={temp_c}, threshold={THRESHOLD_VALUES['temp']})")
+                        elif dev_name_lower == 'motor':
+                            co2_v = LAST_SENSOR.get('co2', 400)
+                            DEVICE_STATES[dev_name_lower] = (co2_v > THRESHOLD_VALUES['co2'])
+                            print(f"   → 设备状态更新: {dev_name_lower} = {DEVICE_STATES[dev_name_lower]} (auto, co2={co2_v}, threshold={THRESHOLD_VALUES['co2']})")
+                        else:
+                            DEVICE_STATES[dev_name_lower] = True
+                    elif dev_action.lower() == 'on':
+                        DEVICE_STATES[dev_name_lower] = True
+                    elif dev_action.lower() == 'manual':
+                        DEVICE_STATES[dev_name_lower] = False
+                    elif dev_action == '180':  # SERVO_180 → 舵机开启
+                        DEVICE_STATES[dev_name_lower] = True
+                    elif dev_action == '0':    # SERVO_0 → 舵机关闭
+                        DEVICE_STATES[dev_name_lower] = False
                     print(f"   → 设备状态更新: {dev_name_lower} = {DEVICE_STATES[dev_name_lower]}")
             
             # 清空命令
@@ -274,6 +315,15 @@ def main():
             
             # 检查是否为阈值汇总行（包含所有设备实际状态）
             if '阈值汇总:' in line:
+                # 解析阈值数值
+                tv = THRESHOLD_VALUES_PATTERN.search(line)
+                if tv:
+                    THRESHOLD_VALUES['temp'] = float(tv.group(1))
+                    THRESHOLD_VALUES['hum'] = float(tv.group(2))
+                    THRESHOLD_VALUES['soil'] = int(tv.group(3))
+                    THRESHOLD_VALUES['co2'] = int(tv.group(4))
+                    THRESHOLD_VALUES['water'] = int(tv.group(5))
+                # 解析设备模式
                 tm = THRESHOLD_PATTERN.search(line)
                 if tm:
                     fan_mode = tm.group(1)
@@ -281,19 +331,31 @@ def main():
                     motor_mode = tm.group(3)
                     flame_mode = tm.group(4)
                     human_mode = tm.group(5)
-                    # 更新设备状态：'关闭'→False, '自动'/'开启'→True
-                    DEVICE_STATES['fan'] = (fan_mode != '关闭')
-                    DEVICE_STATES['pump'] = (pump_mode != '关闭')
-                    DEVICE_STATES['motor'] = (motor_mode != '关闭')
+                    # 风扇/水泵/舵机：手动→manual, 自动→auto（同时更新推断状态）
+                    fan_mode_val = 'auto' if fan_mode == '自动' else 'manual'
+                    pump_mode_val = 'auto' if pump_mode == '自动' else 'manual'
+                    motor_mode_val = 'auto' if motor_mode == '自动' else 'manual'
+                    # 火焰/人体蜂鸣模式：'关闭'→False, '自动'/'开启'→True
                     DEVICE_STATES['flame'] = (flame_mode != '关闭')
                     DEVICE_STATES['human'] = (human_mode != '关闭')
-                    print(f"   → 设备状态更新: 风扇={fan_mode}({DEVICE_STATES['fan']}), 水泵={pump_mode}({DEVICE_STATES['pump']}), 舵机={motor_mode}({DEVICE_STATES['motor']}), 火焰={flame_mode}({DEVICE_STATES['flame']}), 人体={human_mode}({DEVICE_STATES['human']})")
+                    # 在自动模式下，根据上次传感器数据推断设备实际状态
+                    # 水泵：自动模式下土壤湿度低于阈值 → 开启
+                    # 风扇：自动模式下温度高于阈值 → 开启
+                    # 舵机：自动模式下CO2高于阈值 → 开启
+                    soil_m = LAST_SENSOR.get('soil_moisture', 50)
+                    temp_c = LAST_SENSOR.get('temperature', 25)
+                    co2_v = LAST_SENSOR.get('co2', 400)
+                    DEVICE_STATES['pump'] = (pump_mode_val == 'auto' and soil_m < THRESHOLD_VALUES['soil'])
+                    DEVICE_STATES['fan'] = (fan_mode_val == 'auto' and temp_c > THRESHOLD_VALUES['temp'])
+                    DEVICE_STATES['motor'] = (motor_mode_val == 'auto' and co2_v > THRESHOLD_VALUES['co2'])
+                    print(f"   → 阈值更新: 温度={THRESHOLD_VALUES['temp']}C 土壤={THRESHOLD_VALUES['soil']}% CO2={THRESHOLD_VALUES['co2']}")
+                    print(f"   → 模式更新: 风扇={fan_mode}({fan_mode_val}) 水泵={pump_mode}({pump_mode_val}) 舵机={motor_mode}({motor_mode_val}) 火焰={flame_mode} 人体={human_mode}")
                     # 将实际模式写入共享文件（供 app_ultra_fast.py 读取）
                     mode_map = {'自动': 'auto', '开启': 'on', '关闭': 'off'}
                     write_device_state_file({
-                        'fan': mode_map.get(fan_mode, 'off'),
-                        'pump': mode_map.get(pump_mode, 'off'),
-                        'motor': mode_map.get(motor_mode, 'off'),
+                        'fan': fan_mode_val,
+                        'pump': pump_mode_val,
+                        'motor': motor_mode_val,
                         'flame': mode_map.get(flame_mode, 'off'),
                         'human': mode_map.get(human_mode, 'off'),
                         'buzzer': 'on' if DEVICE_STATES.get('buzzer') else 'off',
@@ -329,8 +391,8 @@ def main():
             
             flame_detected = (flame_level == 0)
             
-            # 人体检测：level==0 表示检测到人体
-            human_detected = (human_level == 0)
+            # 人体检测：level!=0 表示检测到人体（PIR 传感器输出 HIGH=1 表示有人）
+            human_detected = (human_level != 0)
             
             # 从内存缓存读取设备状态（由 send_cmd 根据指令更新）
             pump_status = DEVICE_STATES.get('pump', False)
@@ -345,6 +407,11 @@ def main():
             if not (-20 <= temperature <= 60 and 0 <= humidity <= 100):
                 time.sleep(0.5)
                 continue
+            
+            # 更新上次传感器数据缓存（用于推断自动模式下设备状态）
+            LAST_SENSOR['soil_moisture'] = soil_moisture
+            LAST_SENSOR['temperature'] = temperature
+            LAST_SENSOR['co2'] = co2_raw
             
             # 写入数据库（失败时重连一次）
             ok = insert_sensor_data(conn, temperature, humidity, soil_moisture,
