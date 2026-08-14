@@ -56,6 +56,9 @@ CURRENT_DEVICE_STATE = {
 
 # 本地命令变更标记（避免服务器命令覆盖本地操作）
 LOCAL_CHANGED = set()
+# 本地锁定时间戳（超时后自动解除，默认5秒）
+LOCAL_CHANGED_TIMES = {}
+LOCAL_CHANGED_TIMEOUT = 5.0
 
 # 本地阈值缓存（避免重复发送相同值）
 CURRENT_THRESHOLDS = {
@@ -378,6 +381,7 @@ def send_control_command(ser_ctrl, device, action):
 
     old_state = CURRENT_DEVICE_STATE.get(device, '未知')
     ser_ctrl.write((cmd + '\n').encode('utf-8'))
+    ser_ctrl.flush()
     status_map = {'on': '开启', 'off': '关闭', 'auto': '自动'}
     print(f"[控制] 🔧 {device} → {status_map.get(action, action)} (指令: {cmd}) → {SERIAL_PORT_CTRL}")
     print(f"   → 状态变更: {old_state} → {action}")
@@ -391,7 +395,8 @@ def send_control_command_local(ser_ctrl, device, action):
     ok = send_control_command(ser_ctrl, device, action)
     if ok:
         LOCAL_CHANGED.add(device)
-        print(f"  🔒 标记 {device} 为本地变更，服务器同步将跳过")
+        LOCAL_CHANGED_TIMES[device] = time.time()
+        print(f"  🔒 标记 {device} 为本地变更，服务器同步将跳过（超时{int(LOCAL_CHANGED_TIMEOUT)}秒）")
     return ok
 
 
@@ -405,48 +410,71 @@ def check_local_commands(ser_ctrl):
         if not content:
             return
         cmd_data = json.loads(content)
-        if cmd_data.get('pending') and cmd_data.get('cmd'):
-            cmd = cmd_data['cmd'].strip()
-            
-            # 处理水泵特殊指令：1/0/auto（无下划线格式）
+        if not cmd_data.get('pending') or not cmd_data.get('cmd'):
+            return
+        
+        cmd = cmd_data['cmd'].strip()
+        
+        # 如果 serial_to_db_fixed.py 已处理（processed=true），只更新 CURRENT_DEVICE_STATE 并清空文件
+        if cmd_data.get('processed'):
+            print(f"  📋 检测到 serial_to_db_fixed.py 已处理指令: {cmd}")
+            # 解析指令更新 CURRENT_DEVICE_STATE
             if cmd in ('1', '0', 'auto'):
                 action_map = {'1': 'on', '0': 'off', 'auto': 'auto'}
-                send_control_command_local(ser_ctrl, 'pump', action_map[cmd])
+                CURRENT_DEVICE_STATE['pump'] = action_map[cmd]
+                print(f"  → CURRENT_DEVICE_STATE 更新: pump = {CURRENT_DEVICE_STATE['pump']}")
             else:
-                # 解析指令格式：HUMAN_OFF → device='human', action='off'
                 parts = cmd.split('_', 1)
                 if len(parts) == 2:
                     dev_name = parts[0].lower()
                     act_name = parts[1].lower()
-                    # 跳过 SET_xxx 指令（阈值指令由 sync_thresholds 处理）
-                    if dev_name.startswith('set'):
-                        cmd_upper = cmd.upper()
-                        for th_type, prefix in THRESHOLD_CMD_MAP.items():
-                            if cmd_upper.startswith(prefix):
-                                value_str = cmd_upper[len(prefix):].strip()
-                                try:
-                                    value = float(value_str)
-                                    send_threshold_command(ser_ctrl, th_type, value)
-                                except ValueError:
-                                    pass
-                                break
-                    elif dev_name in DEVICE_CMD_MAP:
-                        send_control_command_local(ser_ctrl, dev_name, act_name)
-                    # 舵机指令特殊处理：SERVO_180 → motor on
-                    elif dev_name == 'servo':
-                        # 映射 servo → motor
-                        action_map = {'180': 'on', '0': 'off', 'auto': 'auto'}
-                        mapped_action = action_map.get(act_name)
-                        if mapped_action:
-                            send_control_command_local(ser_ctrl, 'motor', mapped_action)
-                        else:
-                            # 其他角度指令（如 SERVO_90），直接发送到串口
-                            ser_ctrl.write((cmd + '\n').encode('utf-8'))
-                            print(f"[控制] 🔧 舵机 → {act_name}° (指令: {cmd}) → {SERIAL_PORT_CTRL}")
-                            time.sleep(0.3)
-            # 清空命令文件
+                    if dev_name in DEVICE_CMD_MAP:
+                        CURRENT_DEVICE_STATE[dev_name] = act_name
+                        print(f"  → CURRENT_DEVICE_STATE 更新: {dev_name} = {act_name}")
+            # 清空文件
             with open(CMD_FILE, 'w') as f:
                 json.dump({'cmd': '', 'pending': False}, f)
+            return
+        
+        # 处理水泵特殊指令：1/0/auto（无下划线格式）
+        if cmd in ('1', '0', 'auto'):
+            action_map = {'1': 'on', '0': 'off', 'auto': 'auto'}
+            send_control_command_local(ser_ctrl, 'pump', action_map[cmd])
+        else:
+            # 解析指令格式：HUMAN_OFF → device='human', action='off'
+            parts = cmd.split('_', 1)
+            if len(parts) == 2:
+                dev_name = parts[0].lower()
+                act_name = parts[1].lower()
+                # 跳过 SET_xxx 指令（阈值指令由 sync_thresholds 处理）
+                if dev_name.startswith('set'):
+                    cmd_upper = cmd.upper()
+                    for th_type, prefix in THRESHOLD_CMD_MAP.items():
+                        if cmd_upper.startswith(prefix):
+                            value_str = cmd_upper[len(prefix):].strip()
+                            try:
+                                value = float(value_str)
+                                send_threshold_command(ser_ctrl, th_type, value)
+                            except ValueError:
+                                pass
+                            break
+                elif dev_name in DEVICE_CMD_MAP:
+                    send_control_command_local(ser_ctrl, dev_name, act_name)
+                # 舵机指令特殊处理：SERVO_180 → motor on
+                elif dev_name == 'servo':
+                    # 映射 servo → motor
+                    action_map = {'180': 'on', '0': 'off', 'auto': 'auto'}
+                    mapped_action = action_map.get(act_name)
+                    if mapped_action:
+                        send_control_command_local(ser_ctrl, 'motor', mapped_action)
+                    else:
+                        # 其他角度指令（如 SERVO_90），直接发送到串口
+                        ser_ctrl.write((cmd + '\n').encode('utf-8'))
+                        print(f"[控制] 🔧 舵机 → {act_name}° (指令: {cmd}) → {SERIAL_PORT_CTRL}")
+                        time.sleep(0.3)
+        # 清空命令文件
+        with open(CMD_FILE, 'w') as f:
+            json.dump({'cmd': '', 'pending': False}, f)
     except Exception as e:
         print(f"[本地命令] 处理失败: {e}")
 
@@ -509,6 +537,9 @@ def execute_post_sequence(ser_adp, sensor_data):
         'pump': get_device_inferred_state('pump', sensor_data),
         'fan': get_device_inferred_state('fan', sensor_data),
         'motor': get_device_inferred_state('motor', sensor_data),
+        # 添加警报模式状态（1=开启/自动, 0=关闭）
+        'flame_status': 1 if CURRENT_DEVICE_STATE.get('flame') in ('on', 'auto') else 0,
+        'human_status': 1 if CURRENT_DEVICE_STATE.get('human') in ('on', 'auto') else 0,
     }
     json_str = json.dumps(payload, ensure_ascii=False)
     data_len = len(json_str.encode('utf-8'))
@@ -551,7 +582,17 @@ def sync_device_state(ser_ctrl, server_commands):
         if LOCAL_CHANGED:
             print(f"  🔓 解除所有本地锁定: {LOCAL_CHANGED}")
             LOCAL_CHANGED.clear()
+            LOCAL_CHANGED_TIMES.clear()
         return False
+
+    # 检查超时的本地锁定（超过5秒自动解除）
+    now = time.time()
+    expired = [d for d in list(LOCAL_CHANGED) if d in LOCAL_CHANGED_TIMES and now - LOCAL_CHANGED_TIMES[d] > LOCAL_CHANGED_TIMEOUT]
+    if expired:
+        print(f"  🔓 本地锁定超时，自动解除: {expired}")
+        for d in expired:
+            LOCAL_CHANGED.discard(d)
+            LOCAL_CHANGED_TIMES.pop(d, None)
 
     changed = False
     for device, target_action in device_cmds.items():
@@ -559,7 +600,8 @@ def sync_device_state(ser_ctrl, server_commands):
             continue
         # 跳过本地变更的设备（等待服务器同步更新）
         if device in LOCAL_CHANGED:
-            print(f"  ⏭️ 跳过 {device}：本地已变更，等待服务器同步")
+            remain = int(LOCAL_CHANGED_TIMEOUT - (now - LOCAL_CHANGED_TIMES.get(device, now)))
+            print(f"  ⏭️ 跳过 {device}：本地已变更（剩余{max(0, remain)}秒解锁）")
             continue
         current = CURRENT_DEVICE_STATE[device]
         if current != target_action:
@@ -571,6 +613,7 @@ def sync_device_state(ser_ctrl, server_commands):
     for device in list(LOCAL_CHANGED):
         if device in device_cmds and CURRENT_DEVICE_STATE.get(device) == device_cmds[device]:
             LOCAL_CHANGED.discard(device)
+            LOCAL_CHANGED_TIMES.pop(device, None)
             print(f"  🔓 {device} 已与服务器同步，解除本地锁定")
 
     if not changed:
@@ -664,9 +707,10 @@ def main():
             else:
                 sensor_data = last_sensor_data
 
+            # ===== 第二步：检查本地命令文件（独立于传感器数据，确保始终处理） =====
+            check_local_commands(ser_ctrl)
+
             if sensor_data:
-                # ===== 第二步：检查本地命令文件（先更新 CURRENT_DEVICE_STATE，再写入数据库） =====
-                check_local_commands(ser_ctrl)
                 
                 # ===== 写入数据库 =====
                 if db_conn:

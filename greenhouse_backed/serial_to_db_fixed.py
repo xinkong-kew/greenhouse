@@ -204,35 +204,12 @@ def send_cmd(ser):
         if cmd_data.get('pending') and cmd_data.get('cmd'):
             cmd = cmd_data['cmd'].strip()
             
-            # SET_xxx 阈值指令由 zhiling.py 的 sync_thresholds 处理，这里跳过避免重复发送
+            # SET_xxx 阈值指令：不清空文件，让 zhiling.py 的 sync_thresholds 处理
             cmd_name_first = cmd.split()[0] if cmd else ''
             if cmd_name_first.startswith('SET_'):
                 print(f"📤 跳过阈值指令: {cmd} (由 zhiling.py 处理)")
-                with open(CMD_FILE, 'w') as f:
-                    json.dump({'cmd': '', 'pending': False}, f)
                 return
-            
-            # HUMAN_/FLAME_ 警报指令由 zhiling.py 处理，避免清空文件后 zhiling.py 看不到命令
-            cmd_upper = cmd_name_first.upper() if cmd_name_first else ''
-            if cmd_upper.startswith('HUMAN_') or cmd_upper.startswith('FLAME_'):
-                print(f"📤 跳过警报指令: {cmd} (由 zhiling.py 处理)")
-                # 不清空文件，让 zhiling.py 处理
-                return
-            
-            # 水泵 1/0/auto 指令：更新状态但不发送到串口（由 zhiling.py 处理），也不清空文件
-            if cmd in ('1', '0', 'auto'):
-                if cmd == '1':
-                    DEVICE_STATES['pump'] = True
-                    print(f"📤 跳过水泵指令: {cmd} (状态更新: pump=True, 由 zhiling.py 发送到串口)")
-                elif cmd == '0':
-                    DEVICE_STATES['pump'] = False
-                    print(f"📤 跳过水泵指令: {cmd} (状态更新: pump=False, 由 zhiling.py 发送到串口)")
-                else:
-                    soil_m = LAST_SENSOR.get('soil_moisture', 50)
-                    DEVICE_STATES['pump'] = (soil_m < THRESHOLD_VALUES['soil'])
-                    print(f"📤 跳过水泵指令: {cmd} (状态更新: pump={DEVICE_STATES['pump']}, 由 zhiling.py 发送到串口)")
-                return
-            
+
             ser.write((cmd + '\n').encode('utf-8'))
             print(f"📤 发送指令: {cmd}")
             
@@ -286,9 +263,9 @@ def send_cmd(ser):
                         DEVICE_STATES[dev_name_lower] = False
                     print(f"   → 设备状态更新: {dev_name_lower} = {DEVICE_STATES[dev_name_lower]}")
             
-            # 清空命令
+            # 标记已处理，不清空文件（让 zhiling.py 检测到并更新 CURRENT_DEVICE_STATE）
             with open(CMD_FILE, 'w') as f:
-                json.dump({'cmd': '', 'pending': False}, f)
+                json.dump({'cmd': cmd, 'pending': True, 'processed': True}, f)
             time.sleep(0.2)
     except Exception:
         pass
