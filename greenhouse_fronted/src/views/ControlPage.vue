@@ -123,9 +123,9 @@
               <span class="toggle-slider"></span>
             </label>
             <span :class="deviceStatus[device.key] ? 'status-on' : 'status-off'">
-              {{ deviceStatus[device.key] ? (deviceAutoMode[device.key] ? '自动' : (device.key === 'flame' || device.key === 'human' ? '已关闭' : '已开启')) : '已关闭' }}
+              {{ deviceStatus[device.key] ? (deviceAutoMode[device.key] ? '自动' : '已开启') : '已关闭' }}
             </span>
-            <button class="btn btn-sm btn-auto" @click="setDeviceAuto(device.key)" :title="'切换' + device.label + '为自动模式'" v-if="device.key !== 'flame' && device.key !== 'human'">
+            <button class="btn btn-sm btn-auto" @click="setDeviceAuto(device.key)" :title="'切换' + device.label + '为自动模式'">
               🔄 自动
             </button>
           </div>
@@ -344,17 +344,9 @@ function addCmdLog(type, desc) {
 
 // ===== 设备控制 =====
 function toggleDevice(device) {
-  const isAlarm = device === 'flame' || device === 'human'
   const labelMap = { pump: '水泵', fan: '风扇', motor: '舵机', flame: '火焰警报', human: '安防警报' }
-  let action
-  if (isAlarm) {
-    // 二态切换：off → auto → off
-    const cycle = { 'off': 'auto', 'auto': 'off' }
-    action = cycle[deviceAction[device]] || 'auto'
-  } else {
-    // 二态切换：off → on → off
-    action = deviceAction[device] === 'on' ? 'off' : 'on'
-  }
+  // 自动模式点滚轮 → 关闭；否则按正常二态切换
+  const action = deviceAutoMode[device] ? 'off' : (deviceAction[device] === 'on' ? 'off' : 'on')
 
   fetch('/api/device/control', {
     method: 'POST',
@@ -366,14 +358,8 @@ function toggleDevice(device) {
       if (data.success) {
         deviceAction[device] = action
         deviceStatus[device] = action !== 'off'
-        if (isAlarm) {
-          deviceAutoMode[device] = (action === 'auto')
-        } else {
-          deviceAutoMode[device] = false
-        }
-        const actionText = isAlarm
-          ? ({ 'off': '关闭', 'auto': '自动' })[action] || action
-          : (action === 'on' ? '开启' : '关闭')
+        deviceAutoMode[device] = false  // 手动操作退出自动模式
+        const actionText = action === 'on' ? '开启' : '关闭'
         addCmdLog('device', `${labelMap[device] || device} → ${actionText}`)
       } else {
         addCmdLog('device', `${labelMap[device] || device} 操作失败: ${data.error || '未知错误'}`)
@@ -385,7 +371,7 @@ function toggleDevice(device) {
 }
 
 function setDeviceAuto(device) {
-  const labelMap = { pump: '水泵', fan: '风扇', motor: '舵机' }
+  const labelMap = { pump: '水泵', fan: '风扇', motor: '舵机', flame: '火焰警报', human: '安防警报' }
   fetch('/api/device/control', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

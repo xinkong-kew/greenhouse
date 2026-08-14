@@ -423,6 +423,8 @@ def check_local_commands(ser_ctrl):
                 action_map = {'1': 'on', '0': 'off', 'auto': 'auto'}
                 CURRENT_DEVICE_STATE['pump'] = action_map[cmd]
                 print(f"  → CURRENT_DEVICE_STATE 更新: pump = {CURRENT_DEVICE_STATE['pump']}")
+                LOCAL_CHANGED.add('pump')
+                LOCAL_CHANGED_TIMES['pump'] = time.time()
             else:
                 parts = cmd.split('_', 1)
                 if len(parts) == 2:
@@ -431,6 +433,9 @@ def check_local_commands(ser_ctrl):
                     if dev_name in DEVICE_CMD_MAP:
                         CURRENT_DEVICE_STATE[dev_name] = act_name
                         print(f"  → CURRENT_DEVICE_STATE 更新: {dev_name} = {act_name}")
+                        # 加入本地锁定，防止 sync_device_state 立即用服务器旧值覆盖
+                        LOCAL_CHANGED.add(dev_name)
+                        LOCAL_CHANGED_TIMES[dev_name] = time.time()
             # 清空文件
             with open(CMD_FILE, 'w') as f:
                 json.dump({'cmd': '', 'pending': False}, f)
