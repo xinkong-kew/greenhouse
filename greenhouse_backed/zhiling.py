@@ -328,39 +328,37 @@ def parse_arduino_status(line):
     flame_status = m.group(4)
     human_status = m.group(5)
 
-    # 火焰/人体使用标准映射
+    # 火焰/人体使用标准映射（跳过本地刚变更的设备，避免覆盖用户操作）
     mode_map = {'自动': 'auto', '开启': 'on', '关闭': 'off'}
-    if flame_status and flame_status in mode_map:
+    if flame_status and flame_status in mode_map and 'flame' not in LOCAL_CHANGED:
         CURRENT_DEVICE_STATE['flame'] = mode_map[flame_status]
-    if human_status and human_status in mode_map:
+    if human_status and human_status in mode_map and 'human' not in LOCAL_CHANGED:
         CURRENT_DEVICE_STATE['human'] = mode_map[human_status]
 
-    # 风扇/水泵/舵机：推断实际状态
-    # 自动模式下根据传感器数据推断是否开启
+    # 风扇/水泵/舵机：推断实际状态（跳过本地刚变更的设备）
     soil_m = LAST_SENSOR.get('soil', 50)
     temp_c = LAST_SENSOR.get('temp', 25)
     co2_v = LAST_SENSOR.get('co2', 400)
-    
-    if fan_status == '自动':
+    if fan_status == '自动' and 'fan' not in LOCAL_CHANGED:
         CURRENT_DEVICE_STATE['fan'] = 'on' if temp_c > THRESHOLD_VALUES['temp'] else 'off'
-    elif fan_status in mode_map:
+    elif fan_status in mode_map and 'fan' not in LOCAL_CHANGED:
         CURRENT_DEVICE_STATE['fan'] = mode_map[fan_status]
     
-    if pump_status == '自动':
+    if pump_status == '自动' and 'pump' not in LOCAL_CHANGED:
         CURRENT_DEVICE_STATE['pump'] = 'on' if soil_m < THRESHOLD_VALUES['soil'] else 'off'
-    elif pump_status in mode_map:
+    elif pump_status in mode_map and 'pump' not in LOCAL_CHANGED:
         CURRENT_DEVICE_STATE['pump'] = mode_map[pump_status]
     
-    if motor_status == '自动':
+    if motor_status == '自动' and 'motor' not in LOCAL_CHANGED:
         CURRENT_DEVICE_STATE['motor'] = 'on' if co2_v > THRESHOLD_VALUES['co2'] else 'off'
-    elif motor_status in mode_map:
+    elif motor_status in mode_map and 'motor' not in LOCAL_CHANGED:
         CURRENT_DEVICE_STATE['motor'] = mode_map[motor_status]
 
     print(f"  [Arduino状态] 风扇={fan_status}({CURRENT_DEVICE_STATE['fan']}) 水泵={pump_status}({CURRENT_DEVICE_STATE['pump']}) 舵机={motor_status}({CURRENT_DEVICE_STATE['motor']}) 火焰={flame_status or 'N/A'} 人体={human_status or 'N/A'}")
     print(f"  [阈值] 温度={THRESHOLD_VALUES['temp']}C 土壤={THRESHOLD_VALUES['soil']}% CO2={THRESHOLD_VALUES['co2']}")
     
-    # 写入共享文件（供 app_ultra_fast.py 读取）
-    _write_device_state_to_file()
+    # 注意：不在此处写文件！由主循环在 check_local_commands 和 sync_device_state 之后统一写入
+    # 避免在 check_local_commands 处理命令之前把旧值写入文件
     return True
 
 
@@ -708,17 +706,19 @@ def main():
             print(f"📡 第 {round_count} 轮")
             print(f"{'='*50}")
 
-            # ===== 第一步：读取 Arduino 传感器数据 =====
+            # ===== 第一步：检查本地命令文件（优先处理，确保 POST 时状态已更新） =====
+            check_local_commands(ser_ctrl)
+            # 立即写文件，确保 device_state.json 与 CURRENT_DEVICE_STATE 同步
+            _write_device_state_to_file()
+
+            # ===== 第二步：读取 Arduino 传感器数据 =====
             sensor_data = read_sensor_line(ser_ctrl)
+            # 传感器读取中可能调用了 parse_arduino_status 更新了状态，写文件同步
+            _write_device_state_to_file()
             if sensor_data:
                 last_sensor_data = sensor_data
             else:
                 sensor_data = last_sensor_data
-
-            # ===== 第二步：检查本地命令文件（独立于传感器数据，确保始终处理） =====
-            check_local_commands(ser_ctrl)
-            # 立即写文件，确保 device_state.json 与 CURRENT_DEVICE_STATE 同步
-            _write_device_state_to_file()
 
             if sensor_data:
                 

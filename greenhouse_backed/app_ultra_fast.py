@@ -658,7 +658,8 @@ def device_state_file_monitor():
                 if content:
                     state = json.loads(content)
                     # 更新 device_action_cache（跳过前端近期修改的设备）
-                    for key in ['pump', 'fan', 'motor', 'flame', 'human']:
+                    # 注意：flame/human 由前端 API 直接管理，不从文件覆盖（文件状态可能滞后）
+                    for key in ['pump', 'fan', 'motor']:
                         if key in state and key not in FRONTEND_CHANGED:
                             device_action_cache[key] = state[key]
         except Exception as e:
