@@ -1,1 +1,1 @@
-{"fan": "manual", "pump": "manual", "motor": "manual", "flame": "off", "human": "off", "buzzer": "off"}
+{"pump": "on", "fan": "off", "motor": "off", "flame": "auto", "human": "auto"}

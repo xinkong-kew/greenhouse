@@ -360,11 +360,12 @@ def main():
                     print(f"   → 阈值更新: 温度={THRESHOLD_VALUES['temp']}C 土壤={THRESHOLD_VALUES['soil']}% CO2={THRESHOLD_VALUES['co2']}")
                     print(f"   → 模式更新: 风扇={fan_mode}({fan_mode_val}) 水泵={pump_mode}({pump_mode_val}) 舵机={motor_mode}({motor_mode_val}) 火焰={flame_mode} 人体={human_mode}")
                     # 将实际模式写入共享文件（供 app_ultra_fast.py 读取）
+                    # 注意：写文件用 'on'/'off'/'auto'，不用 'manual'（其他组件不识别）
                     mode_map = {'自动': 'auto', '开启': 'on', '关闭': 'off'}
                     write_device_state_file({
-                        'fan': fan_mode_val,
-                        'pump': pump_mode_val,
-                        'motor': motor_mode_val,
+                        'fan': 'auto' if fan_mode == '自动' else ('on' if DEVICE_STATES.get('fan') else 'off'),
+                        'pump': 'auto' if pump_mode == '自动' else ('on' if DEVICE_STATES.get('pump') else 'off'),
+                        'motor': 'auto' if motor_mode == '自动' else ('on' if DEVICE_STATES.get('motor') else 'off'),
                         'flame': mode_map.get(flame_mode, 'off'),
                         'human': mode_map.get(human_mode, 'off'),
                         'buzzer': 'on' if DEVICE_STATES.get('buzzer') else 'off',
