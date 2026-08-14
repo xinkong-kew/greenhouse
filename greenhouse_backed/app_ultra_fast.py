@@ -1369,6 +1369,9 @@ def api_device_control():
     device = data.get('device', '')
     action = data.get('action', '')
     
+    print(f"\n{'='*50}")
+    print(f"🎯 [前端指令] 收到设备控制请求: device={device}, action={action}")
+    
     if not device or not action:
         return jsonify({'success': False, 'error': '缺少参数'})
     
@@ -1381,15 +1384,18 @@ def api_device_control():
         # 水泵特殊处理：1=开, 0=关, auto=自动
         cmd_map = {'on': '1', 'off': '0', 'auto': 'auto'}
         cmd = cmd_map.get(action, action)
+        print(f"   → 水泵指令: action={action} → cmd={cmd}")
     elif device == 'motor':
         # 舵机：SERVO_180=开, SERVO_0=关, SERVO_AUTO=自动
         cmd_map = {'on': 'SERVO_180', 'off': 'SERVO_0', 'auto': 'SERVO_AUTO'}
         cmd = cmd_map.get(action, action)
+        print(f"   → 舵机指令: action={action} → cmd={cmd}")
     else:
         # 其他设备全部大写: FAN_ON, FLAME_AUTO, etc.
         dev_upper = device.upper()
         act_upper = action.upper()
         cmd = f"{dev_upper}_{act_upper}"
+        print(f"   → 其他设备指令: device={device}, action={action} → cmd={cmd}")
     
     is_on = (action == 'on' or action == 'auto')
     
@@ -1414,6 +1420,7 @@ def api_device_control():
                 conn.commit()
                 cursor.close()
                 conn.close()
+                print(f"   ✅ 数据库更新: {db_field} = {is_on}")
         elif is_alarm:
             # 警报设备也写入数据库，持久化状态
             db_col = f'{device}_status'
@@ -1426,6 +1433,7 @@ def api_device_control():
                         ORDER BY timestamp DESC LIMIT 1
                     """, (is_on,))
                     conn.commit()
+                    print(f"   ✅ 数据库更新: {db_col} = {is_on}")
                 except Exception:
                     pass  # 旧表可能没有该列，忽略
                 cursor.close()
@@ -1434,10 +1442,13 @@ def api_device_control():
         # 2. 更新内存缓存
         if db_field:
             device_status_cache[db_field] = is_on
+            print(f"   ✅ 缓存更新: {db_field} = {is_on}")
         elif is_alarm:
             device_status_cache[f'{device}_status'] = is_on
+            print(f"   ✅ 缓存更新: {device}_status = {is_on}")
         # 更新动作缓存（存储 'on'/'off'/'auto' 字符串）
         device_action_cache[device] = action
+        print(f"   ✅ 动作缓存: {device}_action = {action}")
         
         # 立即推送设备状态变化到前端（确保实时反馈，不依赖监控线程轮询）
         try:
@@ -1448,18 +1459,20 @@ def api_device_control():
             push_status['flame_action'] = device_action_cache.get('flame', 'off')
             push_status['human_action'] = device_action_cache.get('human', 'off')
             socketio.emit('device_status_update', push_status)
+            print(f"   📡 Socket.IO 推送: device_status_update → 前端")
         except:
             pass
         
-        # 3. 写入命令文件（serial_to_db_fixed.py 会读取并发送到串口）
+        # 3. 写入命令文件（serial_to_db_fixed.py 或 zhiling.py 会读取并发送到串口）
         with open(CMD_FILE, 'w') as f:
             json.dump({'cmd': cmd, 'pending': True}, f)
-        print(f"📝 [命令文件] {cmd} → 已写入队列，等待 serial_to_db_fixed.py 发送")
+        print(f"   📝 命令文件写入: {cmd} → 等待脚本读取发送到串口")
         
         # 同时尝试直接串口发送（可能失败，因为串口可能被 serial_to_db_fixed.py 占用）
         send_serial_command_direct(cmd)
+        print(f"   🔗 直接串口发送尝试: {cmd}")
         
-        print(f"[设备控制] {cmd} → 数据库+缓存已更新")
+        print(f"✅ [前端指令] 完成: {cmd} → 数据库+缓存已更新, 命令已写入文件")
         return jsonify({'success': True, 'cmd': cmd, 'message': f'{device} 已{"开启" if is_on else "关闭"}'})
     except Exception as e:
         print(f"[设备控制] 错误: {e}")

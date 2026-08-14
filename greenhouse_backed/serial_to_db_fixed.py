@@ -219,6 +219,20 @@ def send_cmd(ser):
                 # 不清空文件，让 zhiling.py 处理
                 return
             
+            # 水泵 1/0/auto 指令：更新状态但不发送到串口（由 zhiling.py 处理），也不清空文件
+            if cmd in ('1', '0', 'auto'):
+                if cmd == '1':
+                    DEVICE_STATES['pump'] = True
+                    print(f"📤 跳过水泵指令: {cmd} (状态更新: pump=True, 由 zhiling.py 发送到串口)")
+                elif cmd == '0':
+                    DEVICE_STATES['pump'] = False
+                    print(f"📤 跳过水泵指令: {cmd} (状态更新: pump=False, 由 zhiling.py 发送到串口)")
+                else:
+                    soil_m = LAST_SENSOR.get('soil_moisture', 50)
+                    DEVICE_STATES['pump'] = (soil_m < THRESHOLD_VALUES['soil'])
+                    print(f"📤 跳过水泵指令: {cmd} (状态更新: pump={DEVICE_STATES['pump']}, 由 zhiling.py 发送到串口)")
+                return
+            
             ser.write((cmd + '\n').encode('utf-8'))
             print(f"📤 发送指令: {cmd}")
             
@@ -355,15 +369,16 @@ def main():
                     DEVICE_STATES['flame'] = (flame_mode != '关闭')
                     DEVICE_STATES['human'] = (human_mode != '关闭')
                     # 在自动模式下，根据上次传感器数据推断设备实际状态
-                    # 水泵：自动模式下土壤湿度低于阈值 → 开启
-                    # 风扇：自动模式下温度高于阈值 → 开启
-                    # 舵机：自动模式下CO2高于阈值 → 开启
+                    # 手动模式下保持上次状态不变（由 send_cmd 或 zhiling.py 更新）
                     soil_m = LAST_SENSOR.get('soil_moisture', 50)
                     temp_c = LAST_SENSOR.get('temperature', 25)
                     co2_v = LAST_SENSOR.get('co2', 400)
-                    DEVICE_STATES['pump'] = (pump_mode_val == 'auto' and soil_m < THRESHOLD_VALUES['soil'])
-                    DEVICE_STATES['fan'] = (fan_mode_val == 'auto' and temp_c > THRESHOLD_VALUES['temp'])
-                    DEVICE_STATES['motor'] = (motor_mode_val == 'auto' and co2_v > THRESHOLD_VALUES['co2'])
+                    if pump_mode_val == 'auto':
+                        DEVICE_STATES['pump'] = (soil_m < THRESHOLD_VALUES['soil'])
+                    if fan_mode_val == 'auto':
+                        DEVICE_STATES['fan'] = (temp_c > THRESHOLD_VALUES['temp'])
+                    if motor_mode_val == 'auto':
+                        DEVICE_STATES['motor'] = (co2_v > THRESHOLD_VALUES['co2'])
                     print(f"   → 阈值更新: 温度={THRESHOLD_VALUES['temp']}C 土壤={THRESHOLD_VALUES['soil']}% CO2={THRESHOLD_VALUES['co2']}")
                     print(f"   → 模式更新: 风扇={fan_mode}({fan_mode_val}) 水泵={pump_mode}({pump_mode_val}) 舵机={motor_mode}({motor_mode_val}) 火焰={flame_mode} 人体={human_mode}")
                     # 将实际模式写入共享文件（供 app_ultra_fast.py 读取）

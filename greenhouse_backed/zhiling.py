@@ -376,9 +376,11 @@ def send_control_command(ser_ctrl, device, action):
         print(f"[控制] ⚠️ 未知设备/动作: {device}={action}")
         return False
 
+    old_state = CURRENT_DEVICE_STATE.get(device, '未知')
     ser_ctrl.write((cmd + '\n').encode('utf-8'))
     status_map = {'on': '开启', 'off': '关闭', 'auto': '自动'}
     print(f"[控制] 🔧 {device} → {status_map.get(action, action)} (指令: {cmd}) → {SERIAL_PORT_CTRL}")
+    print(f"   → 状态变更: {old_state} → {action}")
     time.sleep(0.3)
     CURRENT_DEVICE_STATE[device] = action
     return True
