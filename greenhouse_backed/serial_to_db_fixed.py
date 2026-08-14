@@ -203,6 +203,22 @@ def send_cmd(ser):
         cmd_data = json.loads(content)
         if cmd_data.get('pending') and cmd_data.get('cmd'):
             cmd = cmd_data['cmd'].strip()
+            
+            # SET_xxx 阈值指令由 zhiling.py 的 sync_thresholds 处理，这里跳过避免重复发送
+            cmd_name_first = cmd.split()[0] if cmd else ''
+            if cmd_name_first.startswith('SET_'):
+                print(f"📤 跳过阈值指令: {cmd} (由 zhiling.py 处理)")
+                with open(CMD_FILE, 'w') as f:
+                    json.dump({'cmd': '', 'pending': False}, f)
+                return
+            
+            # HUMAN_/FLAME_ 警报指令由 zhiling.py 处理，避免清空文件后 zhiling.py 看不到命令
+            cmd_upper = cmd_name_first.upper() if cmd_name_first else ''
+            if cmd_upper.startswith('HUMAN_') or cmd_upper.startswith('FLAME_'):
+                print(f"📤 跳过警报指令: {cmd} (由 zhiling.py 处理)")
+                # 不清空文件，让 zhiling.py 处理
+                return
+            
             ser.write((cmd + '\n').encode('utf-8'))
             print(f"📤 发送指令: {cmd}")
             

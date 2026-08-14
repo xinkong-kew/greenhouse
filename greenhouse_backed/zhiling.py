@@ -33,7 +33,7 @@ SERIAL_PORT_CTRL = 'COM28'
 BAUDRATE_CTRL = 9600
 
 CMD_INTERVAL = 0.1      # 每条指令间隔（秒）
-CYCLE_INTERVAL = 0.3       # 每轮执行间隔（秒）
+CYCLE_INTERVAL = 0.6       # 每轮执行间隔（秒）
 LINE_ENDING = '\r\n'    # AT 指令换行符
 SENSOR_READ_TIMEOUT = 4  # 读取传感器超时（秒）
 
@@ -142,16 +142,20 @@ def ensure_table(conn):
         print(f"[数据库] 建表失败: {e}")
 
 
-def insert_sensor_data(conn, temp, hum, soil, water, co2_val, flame, human_det, pump, fan, motor, buzzer):
+def insert_sensor_data(conn, temp, hum, soil, water, co2_val, flame, human_det, pump, fan, motor, buzzer,
+                       flame_status=None, human_status=None):
     """插入一条传感器数据到数据库"""
     try:
         c = conn.cursor()
         c.execute("""
             INSERT INTO sensor_data 
             (timestamp, temperature, humidity, soil_moisture, water_level, co2,
-             flame_detected, human_detected, pump_status, fan_status, motor_status, buzzer_status) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (datetime.now(), temp, hum, soil, water, co2_val, flame, human_det, pump, fan, motor, buzzer))
+             flame_detected, human_detected, pump_status, fan_status, motor_status, buzzer_status,
+             flame_status, human_status) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (datetime.now(), temp, hum, soil, water, co2_val, flame, human_det, pump, fan, motor, buzzer,
+              flame_status if flame_status is not None else (1 if CURRENT_DEVICE_STATE.get('flame') in ('on', 'auto') else 0),
+              human_status if human_status is not None else (1 if CURRENT_DEVICE_STATE.get('human') in ('on', 'auto') else 0)))
         conn.commit()
         c.close()
         return True
@@ -401,44 +405,43 @@ def check_local_commands(ser_ctrl):
         cmd_data = json.loads(content)
         if cmd_data.get('pending') and cmd_data.get('cmd'):
             cmd = cmd_data['cmd'].strip()
-            # 解析指令格式：HUMAN_OFF → device='human', action='off'
-            parts = cmd.split('_', 1)
-            if len(parts) == 2:
-                dev_name = parts[0].lower()
-                act_name = parts[1].lower()
-                # 水泵特殊处理：1/0/auto
-                if dev_name == '1':
-                    dev_name, act_name = 'pump', 'on'
-                elif dev_name == '0':
-                    dev_name, act_name = 'pump', 'off'
-                elif dev_name == 'auto':
-                    dev_name, act_name = 'pump', 'auto'
-                # 跳过 SET_xxx 指令（阈值指令由 sync_thresholds 处理）
-                if dev_name.startswith('set'):
-                    cmd_upper = cmd.upper()
-                    for th_type, prefix in THRESHOLD_CMD_MAP.items():
-                        if cmd_upper.startswith(prefix):
-                            value_str = cmd_upper[len(prefix):].strip()
-                            try:
-                                value = float(value_str)
-                                send_threshold_command(ser_ctrl, th_type, value)
-                            except ValueError:
-                                pass
-                            break
-                elif dev_name in DEVICE_CMD_MAP:
-                    send_control_command_local(ser_ctrl, dev_name, act_name)
-                # 舵机指令特殊处理：SERVO_180 → motor on
-                elif dev_name == 'servo':
-                    # 映射 servo → motor
-                    action_map = {'180': 'on', '0': 'off', 'auto': 'auto'}
-                    mapped_action = action_map.get(act_name)
-                    if mapped_action:
-                        send_control_command_local(ser_ctrl, 'motor', mapped_action)
-                    else:
-                        # 其他角度指令（如 SERVO_90），直接发送到串口
-                        ser_ctrl.write((cmd + '\n').encode('utf-8'))
-                        print(f"[控制] 🔧 舵机 → {act_name}° (指令: {cmd}) → {SERIAL_PORT_CTRL}")
-                        time.sleep(0.3)
+            
+            # 处理水泵特殊指令：1/0/auto（无下划线格式）
+            if cmd in ('1', '0', 'auto'):
+                action_map = {'1': 'on', '0': 'off', 'auto': 'auto'}
+                send_control_command_local(ser_ctrl, 'pump', action_map[cmd])
+            else:
+                # 解析指令格式：HUMAN_OFF → device='human', action='off'
+                parts = cmd.split('_', 1)
+                if len(parts) == 2:
+                    dev_name = parts[0].lower()
+                    act_name = parts[1].lower()
+                    # 跳过 SET_xxx 指令（阈值指令由 sync_thresholds 处理）
+                    if dev_name.startswith('set'):
+                        cmd_upper = cmd.upper()
+                        for th_type, prefix in THRESHOLD_CMD_MAP.items():
+                            if cmd_upper.startswith(prefix):
+                                value_str = cmd_upper[len(prefix):].strip()
+                                try:
+                                    value = float(value_str)
+                                    send_threshold_command(ser_ctrl, th_type, value)
+                                except ValueError:
+                                    pass
+                                break
+                    elif dev_name in DEVICE_CMD_MAP:
+                        send_control_command_local(ser_ctrl, dev_name, act_name)
+                    # 舵机指令特殊处理：SERVO_180 → motor on
+                    elif dev_name == 'servo':
+                        # 映射 servo → motor
+                        action_map = {'180': 'on', '0': 'off', 'auto': 'auto'}
+                        mapped_action = action_map.get(act_name)
+                        if mapped_action:
+                            send_control_command_local(ser_ctrl, 'motor', mapped_action)
+                        else:
+                            # 其他角度指令（如 SERVO_90），直接发送到串口
+                            ser_ctrl.write((cmd + '\n').encode('utf-8'))
+                            print(f"[控制] 🔧 舵机 → {act_name}° (指令: {cmd}) → {SERIAL_PORT_CTRL}")
+                            time.sleep(0.3)
             # 清空命令文件
             with open(CMD_FILE, 'w') as f:
                 json.dump({'cmd': '', 'pending': False}, f)
@@ -500,6 +503,7 @@ def execute_post_sequence(ser_adp, sensor_data):
         'water': sensor_data.get('water', 0),
         'co2': sensor_data.get('co2', 0),
         'flame': sensor_data.get('flame', 0),
+        'human': sensor_data.get('human', 0),
         'pump': get_device_inferred_state('pump', sensor_data),
         'fan': get_device_inferred_state('fan', sensor_data),
         'motor': get_device_inferred_state('motor', sensor_data),
@@ -541,6 +545,10 @@ def sync_device_state(ser_ctrl, server_commands):
 
     device_cmds = server_commands.get('device', {})
     if not device_cmds:
+        # 服务器没有设备指令，解除所有本地锁定（服务器已同步）
+        if LOCAL_CHANGED:
+            print(f"  🔓 解除所有本地锁定: {LOCAL_CHANGED}")
+            LOCAL_CHANGED.clear()
         return False
 
     changed = False
@@ -556,6 +564,12 @@ def sync_device_state(ser_ctrl, server_commands):
             print(f"  ⚡ 状态变化: {device} ({current} → {target_action})")
             send_control_command(ser_ctrl, device, target_action)
             changed = True
+
+    # 解除已与服务器同步的本地锁定
+    for device in list(LOCAL_CHANGED):
+        if device in device_cmds and CURRENT_DEVICE_STATE.get(device) == device_cmds[device]:
+            LOCAL_CHANGED.discard(device)
+            print(f"  🔓 {device} 已与服务器同步，解除本地锁定")
 
     if not changed:
         print("  ✅ 所有设备状态一致，无需修改")
@@ -649,6 +663,9 @@ def main():
                 sensor_data = last_sensor_data
 
             if sensor_data:
+                # ===== 第二步：检查本地命令文件（先更新 CURRENT_DEVICE_STATE，再写入数据库） =====
+                check_local_commands(ser_ctrl)
+                
                 # ===== 写入数据库 =====
                 if db_conn:
                     ok = insert_sensor_data(
@@ -688,9 +705,6 @@ def main():
                                 get_device_inferred_state('motor', sensor_data),
                                 0,
                             )
-
-            # ===== 第二步：检查本地命令文件（来自 Web 前端控制） =====
-            check_local_commands(ser_ctrl)
 
             # ===== 第三步：POST 发送传感器数据到服务器 =====
             execute_post_sequence(ser_adp, sensor_data)
