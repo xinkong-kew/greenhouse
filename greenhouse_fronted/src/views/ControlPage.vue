@@ -123,7 +123,7 @@
               <span class="toggle-slider"></span>
             </label>
             <span :class="deviceStatus[device.key] ? 'status-on' : 'status-off'">
-              {{ deviceStatus[device.key] ? (deviceAutoMode[device.key] ? '自动' : '已开启') : '已关闭' }}
+              {{ deviceStatus[device.key] ? (deviceAutoMode[device.key] ? '自动' : (device.key === 'flame' || device.key === 'human' ? '已关闭' : '已开启')) : '已关闭' }}
             </span>
             <button class="btn btn-sm btn-auto" @click="setDeviceAuto(device.key)" :title="'切换' + device.label + '为自动模式'" v-if="device.key !== 'flame' && device.key !== 'human'">
               🔄 自动
@@ -348,8 +348,8 @@ function toggleDevice(device) {
   const labelMap = { pump: '水泵', fan: '风扇', motor: '舵机', flame: '火焰警报', human: '安防警报' }
   let action
   if (isAlarm) {
-    // 三态切换：off → auto → on → off
-    const cycle = { 'off': 'auto', 'auto': 'on', 'on': 'off' }
+    // 二态切换：off → auto → off
+    const cycle = { 'off': 'auto', 'auto': 'off' }
     action = cycle[deviceAction[device]] || 'auto'
   } else {
     // 二态切换：off → on → off
@@ -372,7 +372,7 @@ function toggleDevice(device) {
           deviceAutoMode[device] = false
         }
         const actionText = isAlarm
-          ? ({ 'off': '关闭', 'auto': '自动', 'on': '开启' })[action] || action
+          ? ({ 'off': '关闭', 'auto': '自动' })[action] || action
           : (action === 'on' ? '开启' : '关闭')
         addCmdLog('device', `${labelMap[device] || device} → ${actionText}`)
       } else {
