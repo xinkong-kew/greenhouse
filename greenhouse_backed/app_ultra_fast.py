@@ -57,6 +57,22 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'sk-ws-H.EERYRXD.kTfS.MEYCIQC
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+# ==================== CORS 支持（移动端/H5 跨域请求） ====================
+@app.after_request
+def add_cors_headers(response):
+    """为所有响应添加 CORS 头，支持 UniApp 等跨域请求"""
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Max-Age'] = '86400'
+    return response
+
+# 处理 OPTIONS 预检请求
+@app.before_request
+def handle_options():
+    if request.method == 'OPTIONS':
+        return Response(status=204)
+
 # 数据库配置对象
 db_config = {
     'host': DB_HOST,
