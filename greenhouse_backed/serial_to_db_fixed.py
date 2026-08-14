@@ -57,9 +57,9 @@ SERIAL_PATTERN = re.compile(
     r'温度=([\d.]+)℃\s+湿度=([\d.]+)%'
 )
 
-# 阈值汇总正则（提取所有设备实际状态）
+# 阈值汇总正则（提取所有设备实际状态，火焰/人体为可选）
 THRESHOLD_PATTERN = re.compile(
-    r'阈值汇总:.*?风扇=(\S+)\s+水泵=(\S+)\s+舵机=(\S+)\s+火焰=(\S+)\s+人体=(\S+)'
+    r'阈值汇总:.*?风扇=(\S+)\s+水泵=(\S+)\s+舵机=(\S+)(?:\s+火焰=(\S+))?(?:\s+人体=(\S+))?'
 )
 
 # 阈值数值正则（提取温度/湿度/土壤/CO2/水位阈值）
@@ -336,8 +336,9 @@ def main():
                     fan_mode = tm.group(1)
                     pump_mode = tm.group(2)
                     motor_mode = tm.group(3)
-                    flame_mode = tm.group(4)
-                    human_mode = tm.group(5)
+                    # 火焰/人体蜂鸣模式（可选字段，旧版固件可能不输出）
+                    flame_mode = tm.group(4) or '关闭'
+                    human_mode = tm.group(5) or '关闭'
                     # 风扇/水泵/舵机：手动→manual, 自动→auto（同时更新推断状态）
                     fan_mode_val = 'auto' if fan_mode == '自动' else 'manual'
                     pump_mode_val = 'auto' if pump_mode == '自动' else 'manual'

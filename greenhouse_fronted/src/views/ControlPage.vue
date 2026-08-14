@@ -123,7 +123,7 @@
               <span class="toggle-slider"></span>
             </label>
             <span :class="deviceStatus[device.key] ? 'status-on' : 'status-off'">
-              {{ deviceStatus[device.key] ? (deviceAutoMode[device.key] ? '自动' : '已开启') : '已关闭' }}
+              {{ deviceStatus[device.key] ? (deviceAutoMode[device.key] ? '自动' : (deviceAction[device.key] === 'on' ? '强制开启' : '已开启')) : '已关闭' }}
             </span>
             <button class="btn btn-sm btn-auto" @click="setDeviceAuto(device.key)" :title="'切换' + device.label + '为自动模式'" v-if="device.key !== 'flame' && device.key !== 'human'">
               🔄 自动
@@ -209,6 +209,15 @@ const deviceAutoMode = reactive({
   motor: false,
   flame: true,
   human: true
+})
+
+// 设备动作缓存 - 存储精确的 'off'/'auto'/'on' 字符串（支持三态）
+const deviceAction = reactive({
+  pump: 'off',
+  fan: 'off',
+  motor: 'off',
+  flame: 'auto',
+  human: 'auto'
 })
 
 const allAutoLoading = ref(false)
@@ -297,7 +306,9 @@ async function applySuggestion(cmd, sg) {
       const data = await res.json()
       if (data.success) {
         // 更新本地设备状态
-        deviceStatus[cmd.device] = cmd.action === 'on'
+        deviceAction[cmd.device] = cmd.action
+        deviceStatus[cmd.device] = cmd.action === 'on' || cmd.action === 'auto'
+        deviceAutoMode[cmd.device] = (cmd.action === 'auto')
         addCmdLog('device', `[天气建议] ${cmd.label}`)
       } else {
         addCmdLog('device', `[天气建议] 执行失败: ${data.error}`)
@@ -333,11 +344,17 @@ function addCmdLog(type, desc) {
 
 // ===== 设备控制 =====
 function toggleDevice(device) {
-  const current = deviceStatus[device]
   const isAlarm = device === 'flame' || device === 'human'
-  // 警报设备：左=关闭(off)，右=自动(auto)；普通设备：左=关闭(off)，右=开启(on)
-  const action = current ? 'off' : (isAlarm ? 'auto' : 'on')
   const labelMap = { pump: '水泵', fan: '风扇', motor: '舵机', flame: '火焰警报', human: '安防警报' }
+  let action
+  if (isAlarm) {
+    // 三态切换：off → auto → on → off
+    const cycle = { 'off': 'auto', 'auto': 'on', 'on': 'off' }
+    action = cycle[deviceAction[device]] || 'auto'
+  } else {
+    // 二态切换：off → on → off
+    action = deviceAction[device] === 'on' ? 'off' : 'on'
+  }
 
   fetch('/api/device/control', {
     method: 'POST',
@@ -347,26 +364,23 @@ function toggleDevice(device) {
     .then(res => res.json())
     .then(data => {
       if (data.success) {
-        deviceStatus[device] = !current
-        // 警报设备：auto 模式时标记为自动；普通设备：手动操作退出自动模式
+        deviceAction[device] = action
+        deviceStatus[device] = action !== 'off'
         if (isAlarm) {
           deviceAutoMode[device] = (action === 'auto')
         } else {
           deviceAutoMode[device] = false
         }
-        const actionText = isAlarm ? (action === 'auto' ? '自动' : '关闭') : (action === 'on' ? '开启' : '关闭')
+        const actionText = isAlarm
+          ? ({ 'off': '关闭', 'auto': '自动', 'on': '强制开启' })[action] || action
+          : (action === 'on' ? '开启' : '关闭')
         addCmdLog('device', `${labelMap[device] || device} → ${actionText}`)
       } else {
         addCmdLog('device', `${labelMap[device] || device} 操作失败: ${data.error || '未知错误'}`)
       }
     })
     .catch(() => {
-      deviceStatus[device] = !current
-      if (isAlarm) {
-        deviceAutoMode[device] = (action === 'auto')
-      }
-      const actionText = isAlarm ? (action === 'auto' ? '自动' : '关闭') : (action === 'on' ? '开启' : '关闭')
-      addCmdLog('device', `${labelMap[device] || device} → ${actionText}`)
+      addCmdLog('device', `${labelMap[device] || device} 操作失败: 网络请求错误`)
     })
 }
 
@@ -380,6 +394,7 @@ function setDeviceAuto(device) {
     .then(res => res.json())
     .then(data => {
       if (data.success) {
+        deviceAction[device] = 'auto'
         deviceStatus[device] = true
         deviceAutoMode[device] = true
         addCmdLog('device', `${labelMap[device] || device} → 启动自动工作模式`)
@@ -388,9 +403,7 @@ function setDeviceAuto(device) {
       }
     })
     .catch(() => {
-      deviceStatus[device] = true
-      deviceAutoMode[device] = true
-      addCmdLog('device', `${labelMap[device] || device} → 启动自动工作模式`)
+      addCmdLog('device', `${labelMap[device] || device} 自动模式设置失败: 网络错误`)
     })
 }
 
@@ -409,11 +422,11 @@ function setAllAuto() {
         if (data.success) {
           deviceStatus[device.key] = true
           deviceAutoMode[device.key] = true
+          deviceAction[device.key] = 'auto'
         }
       })
       .catch(() => {
-        deviceStatus[device.key] = true
-        deviceAutoMode[device.key] = true
+        // 网络失败时不修改状态，避免显示假成功
       })
   })
 

@@ -289,9 +289,9 @@ def read_sensor_line(ser_ctrl):
     return None
 
 
-# 阈值汇总正则 - 解析 Arduino 实际设备状态
+# 阈值汇总正则 - 解析 Arduino 实际设备状态（火焰/人体为可选，兼容旧版固件）
 THRESHOLD_SUMMARY_PATTERN = re.compile(
-    r'阈值汇总:.*?风扇=(\S+)\s+水泵=(\S+)\s+舵机=(\S+)\s+火焰=(\S+)\s+人体=(\S+)'
+    r'阈值汇总:.*?风扇=(\S+)\s+水泵=(\S+)\s+舵机=(\S+)(?:\s+火焰=(\S+))?(?:\s+人体=(\S+))?'
 )
 
 # 阈值数值正则
@@ -324,15 +324,15 @@ def parse_arduino_status(line):
     fan_status = m.group(1)
     pump_status = m.group(2)
     motor_status = m.group(3)
-    # 火焰/人体蜂鸣模式
+    # 火焰/人体蜂鸣模式（可选字段，旧版固件可能不输出）
     flame_status = m.group(4)
     human_status = m.group(5)
 
     # 火焰/人体使用标准映射
     mode_map = {'自动': 'auto', '开启': 'on', '关闭': 'off'}
-    if flame_status in mode_map:
+    if flame_status and flame_status in mode_map:
         CURRENT_DEVICE_STATE['flame'] = mode_map[flame_status]
-    if human_status in mode_map:
+    if human_status and human_status in mode_map:
         CURRENT_DEVICE_STATE['human'] = mode_map[human_status]
 
     # 风扇/水泵/舵机：推断实际状态
@@ -356,7 +356,7 @@ def parse_arduino_status(line):
     elif motor_status in mode_map:
         CURRENT_DEVICE_STATE['motor'] = mode_map[motor_status]
 
-    print(f"  [Arduino状态] 风扇={fan_status}({CURRENT_DEVICE_STATE['fan']}) 水泵={pump_status}({CURRENT_DEVICE_STATE['pump']}) 舵机={motor_status}({CURRENT_DEVICE_STATE['motor']}) 火焰={flame_status} 人体={human_status}")
+    print(f"  [Arduino状态] 风扇={fan_status}({CURRENT_DEVICE_STATE['fan']}) 水泵={pump_status}({CURRENT_DEVICE_STATE['pump']}) 舵机={motor_status}({CURRENT_DEVICE_STATE['motor']}) 火焰={flame_status or 'N/A'} 人体={human_status or 'N/A'}")
     print(f"  [阈值] 温度={THRESHOLD_VALUES['temp']}C 土壤={THRESHOLD_VALUES['soil']}% CO2={THRESHOLD_VALUES['co2']}")
     
     # 写入共享文件（供 app_ultra_fast.py 读取）

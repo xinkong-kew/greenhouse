@@ -95,8 +95,8 @@ device_action_cache = {
     'pump': 'off',
     'fan': 'off',
     'motor': 'off',
-    'flame': 'off',
-    'human': 'off',
+    'flame': 'auto',    # Arduino 默认 BEEP_AUTO
+    'human': 'auto',    # Arduino 默认 BEEP_AUTO
 }
 
 # 阈值缓存 - 记录已设置的阈值
@@ -1559,6 +1559,7 @@ def api_adp610_data():
             'water_level': parsed.get('water_level'),
             'co2': parsed.get('co2'),
             'flame_detected': bool(parsed.get('flame_detected', 0)),
+            'human_detected': bool(parsed.get('human_detected', 0)),
             'pump_status': bool(parsed.get('pump_status', False)),
             'fan_status': bool(parsed.get('fan_status', False)),
             'motor_status': bool(parsed.get('motor_status', False)),
@@ -1573,8 +1574,8 @@ def api_adp610_data():
                 cursor.execute("""
                     INSERT INTO sensor_data
                     (timestamp, temperature, humidity, soil_moisture, water_level, co2,
-                     flame_detected, pump_status, fan_status, motor_status, buzzer_status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     flame_detected, human_detected, pump_status, fan_status, motor_status, buzzer_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     insert_data['timestamp'],
                     insert_data['temperature'],
@@ -1583,6 +1584,7 @@ def api_adp610_data():
                     insert_data['water_level'],
                     insert_data['co2'],
                     insert_data['flame_detected'],
+                    insert_data['human_detected'],
                     insert_data['pump_status'],
                     insert_data['fan_status'],
                     insert_data['motor_status'],
@@ -1621,6 +1623,7 @@ def api_adp610_data():
                 'water_level': insert_data['water_level'],
                 'co2': insert_data['co2'],
                 'flame_detected': insert_data['flame_detected'],
+                'human_detected': insert_data['human_detected'],
                 'pump_status': insert_data['pump_status'],
                 'fan_status': insert_data['fan_status'],
                 'motor_status': insert_data['motor_status'],
