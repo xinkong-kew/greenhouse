@@ -33,7 +33,7 @@ SERIAL_PORT_CTRL = 'COM28'
 BAUDRATE_CTRL = 9600
 
 CMD_INTERVAL = 0.1      # 每条指令间隔（秒）
-CYCLE_INTERVAL = 0.6       # 每轮执行间隔（秒）
+CYCLE_INTERVAL = 0.3       # 每轮执行间隔（秒）
 LINE_ENDING = '\r\n'    # AT 指令换行符
 SENSOR_READ_TIMEOUT = 4  # 读取传感器超时（秒）
 
@@ -434,6 +434,15 @@ def check_local_commands(ser_ctrl):
                         # 加入本地锁定，防止 sync_device_state 立即用服务器旧值覆盖
                         LOCAL_CHANGED.add(dev_name)
                         LOCAL_CHANGED_TIMES[dev_name] = time.time()
+                    elif dev_name == 'servo':
+                        # 舵机指令特殊处理：SERVO_180 → motor on
+                        action_map = {'180': 'on', '0': 'off', 'auto': 'auto'}
+                        mapped_action = action_map.get(act_name)
+                        if mapped_action:
+                            CURRENT_DEVICE_STATE['motor'] = mapped_action
+                            print(f"  → CURRENT_DEVICE_STATE 更新: motor = {mapped_action}（来自 {cmd}）")
+                            LOCAL_CHANGED.add('motor')
+                            LOCAL_CHANGED_TIMES['motor'] = time.time()
             # 清空文件
             with open(CMD_FILE, 'w') as f:
                 json.dump({'cmd': '', 'pending': False}, f)

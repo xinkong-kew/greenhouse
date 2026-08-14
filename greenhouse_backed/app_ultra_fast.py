@@ -1634,15 +1634,6 @@ def api_adp610_data():
                 except:
                     pass
 
-        # 从 POST 数据中更新 device_action_cache（zhiling.py 发送 human_mode/flame_mode）
-        raw_data = request.get_json(force=True, silent=True) or {}
-        if 'human_mode' in raw_data:
-            device_action_cache['human'] = raw_data['human_mode']
-            print(f"  → device_action_cache 更新: human = {raw_data['human_mode']}")
-        if 'flame_mode' in raw_data:
-            device_action_cache['flame'] = raw_data['flame_mode']
-            print(f"  → device_action_cache 更新: flame = {raw_data['flame_mode']}")
-
         # 更新缓存并推送实时数据
         sensor_update = {
             'latest_temp': insert_data['temperature'],
