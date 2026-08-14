@@ -201,7 +201,7 @@ def send_cmd(ser):
         if not content:
             return
         cmd_data = json.loads(content)
-        if cmd_data.get('pending') and cmd_data.get('cmd'):
+        if cmd_data.get('pending') and cmd_data.get('cmd') and not cmd_data.get('processed'):
             cmd = cmd_data['cmd'].strip()
             
             # SET_xxx 阈值指令：不清空文件，让 zhiling.py 的 sync_thresholds 处理

@@ -99,6 +99,11 @@ device_action_cache = {
     'human': 'auto',    # Arduino 默认 BEEP_AUTO
 }
 
+# 前端变更锁定 - 防止 device_state_file_monitor 在几秒内覆盖前端刚刚修改的状态
+FRONTEND_CHANGED = set()
+FRONTEND_CHANGED_TIMES = {}
+FRONTEND_LOCK_SECONDS = 3.0  # 锁定3秒，给 Arduino 足够时间更新状态
+
 # 阈值缓存 - 记录已设置的阈值
 threshold_cache = {}
 
@@ -623,14 +628,22 @@ def device_state_file_monitor():
     """监听设备状态共享文件，更新 device_action_cache（1秒间隔）"""
     while True:
         try:
+            # 清理超时的前端锁定
+            now = time.time()
+            expired = [d for d in list(FRONTEND_CHANGED) if d in FRONTEND_CHANGED_TIMES and now - FRONTEND_CHANGED_TIMES[d] > FRONTEND_LOCK_SECONDS]
+            for d in expired:
+                FRONTEND_CHANGED.discard(d)
+                FRONTEND_CHANGED_TIMES.pop(d, None)
+                print(f"  🔓 前端锁定已超时: {d}，允许文件状态覆盖")
+
             if os.path.exists(DEVICE_STATE_FILE):
                 with open(DEVICE_STATE_FILE, 'r') as f:
                     content = f.read().strip()
                 if content:
                     state = json.loads(content)
-                    # 更新 device_action_cache（只更新文件中存在的键）
+                    # 更新 device_action_cache（跳过前端近期修改的设备）
                     for key in ['pump', 'fan', 'motor', 'flame', 'human']:
-                        if key in state:
+                        if key in state and key not in FRONTEND_CHANGED:
                             device_action_cache[key] = state[key]
         except Exception as e:
             pass  # 静默，文件可能正在被写入
@@ -1448,7 +1461,10 @@ def api_device_control():
             print(f"   ✅ 缓存更新: {device}_status = {is_on}")
         # 更新动作缓存（存储 'on'/'off'/'auto' 字符串）
         device_action_cache[device] = action
-        print(f"   ✅ 动作缓存: {device}_action = {action}")
+        # 锁定该设备，防止 device_state_file_monitor 立即覆盖
+        FRONTEND_CHANGED.add(device)
+        FRONTEND_CHANGED_TIMES[device] = time.time()
+        print(f"   ✅ 动作缓存: {device}_action = {action}（已锁定{int(FRONTEND_LOCK_SECONDS)}秒）")
         
         # 立即推送设备状态变化到前端（确保实时反馈，不依赖监控线程轮询）
         try:

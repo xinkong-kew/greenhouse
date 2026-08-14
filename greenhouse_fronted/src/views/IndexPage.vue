@@ -398,7 +398,7 @@ const chatLoading = ref(false)
 const chatRef = ref(null)
 
 // ===== 监控画面 =====
-const monitorUrl = ref('http://10.194.121.43')
+const monitorUrl = ref('http://192.168.247.43')
 const monitorLoading = ref(true)
 
 // ===== 常用问题快捷按钮 =====
