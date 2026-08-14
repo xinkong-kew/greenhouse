@@ -545,6 +545,9 @@ def execute_post_sequence(ser_adp, sensor_data):
         # 添加警报模式状态（1=开启/自动, 0=关闭）
         'flame_status': 1 if CURRENT_DEVICE_STATE.get('flame') in ('on', 'auto') else 0,
         'human_status': 1 if CURRENT_DEVICE_STATE.get('human') in ('on', 'auto') else 0,
+        # 发送实际模式字符串，让服务器更新 device_action_cache
+        'human_mode': CURRENT_DEVICE_STATE.get('human', 'auto'),
+        'flame_mode': CURRENT_DEVICE_STATE.get('flame', 'auto'),
     }
     json_str = json.dumps(payload, ensure_ascii=False)
     data_len = len(json_str.encode('utf-8'))
@@ -714,6 +717,8 @@ def main():
 
             # ===== 第二步：检查本地命令文件（独立于传感器数据，确保始终处理） =====
             check_local_commands(ser_ctrl)
+            # 立即写文件，确保 device_state.json 与 CURRENT_DEVICE_STATE 同步
+            _write_device_state_to_file()
 
             if sensor_data:
                 
@@ -773,6 +778,8 @@ def main():
                 # ===== 第五步：下发阈值 =====
                 print("  ── 比对阈值 ──")
                 sync_thresholds(ser_ctrl, server_commands)
+                # 同步后写文件，确保文件反映最新状态
+                _write_device_state_to_file()
             else:
                 print("  ⚠️ 未能获取服务器指令")
 
