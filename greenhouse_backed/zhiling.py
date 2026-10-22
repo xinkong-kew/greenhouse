@@ -32,8 +32,8 @@ BAUDRATE_ADP = 115200
 SERIAL_PORT_CTRL = 'COM28'
 BAUDRATE_CTRL = 9600
 
-CMD_INTERVAL = 0.1      # 每条指令间隔（秒）
-CYCLE_INTERVAL = 0.3       # 每轮执行间隔（秒）
+CMD_INTERVAL = 0.3      # 每条指令间隔（秒）
+CYCLE_INTERVAL = 0.5       # 每轮执行间隔（秒）
 LINE_ENDING = '\r\n'    # AT 指令换行符
 SENSOR_READ_TIMEOUT = 4  # 读取传感器超时（秒）
 
@@ -196,15 +196,21 @@ def send_raw(ser, data, wait=0.5, echo=True):
 
 
 def _read_response(ser, timeout=2):
-    """读取串口响应"""
+    """读取串口响应（等待数据稳定后再返回，避免截断分片到达的响应）"""
     response = b''
     deadline = time.time() + timeout
+    no_data_since = None
     while time.time() < deadline:
         if ser.in_waiting:
             response += ser.read(ser.in_waiting)
-            time.sleep(0.1)
+            no_data_since = None  # 收到数据，重置无数据计时
+            time.sleep(0.05)
         else:
-            break
+            if no_data_since is None:
+                no_data_since = time.time()
+            elif time.time() - no_data_since > 0.3:
+                break  # 连续 0.3 秒无数据，认为响应结束
+            time.sleep(0.05)
     if response:
         text = response.decode('utf-8', errors='ignore').strip()
         for line in text.split('\n'):
@@ -577,7 +583,7 @@ def execute_get_sequence(ser_adp):
     send_at(ser_adp, 'AT+HTTPSET="URL","shijie-smartline.club:80/api/adp610/data"', wait=CMD_INTERVAL)
     send_at(ser_adp, 'AT+HTTPSET="UAGENT","fibocom"', wait=CMD_INTERVAL)
     send_at(ser_adp, 'AT+HTTPACT=0,30', wait=2.0)
-    resp = send_at(ser_adp, 'AT+HTTPREAD', wait=1.0)
+    resp = send_at(ser_adp, 'AT+HTTPREAD', wait=2.0)
     data = parse_httpread_response(resp)
     if data and data.get('success') and data.get('commands'):
         return data['commands']

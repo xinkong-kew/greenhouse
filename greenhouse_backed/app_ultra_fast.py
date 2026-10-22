@@ -11,6 +11,7 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 from flask import Flask, render_template, request, jsonify, Response
 from flask_socketio import SocketIO, emit
 import mysql.connector
+import hashlib
 import json
 from datetime import datetime, timedelta
 import threading
@@ -268,7 +269,7 @@ def generate_ai_response(user_message, sensor_context):
         return "请先配置阿里云百炼 API Key（在 app_ultra_fast.py 中设置 DASHSCOPE_API_KEY）"
     try:
         # 构建系统提示词
-        system_prompt = f"""你是一个智能温室监控系统的AI助手。当前温室状态：
+        system_prompt = f"""你是一个绿耕智控系统的AI助手。当前温室状态：
 - 温度: {sensor_context.get('temperature', 0):.1f}°C
 - 湿度: {sensor_context.get('humidity', 0):.1f}%
 - 土壤湿度: {sensor_context.get('soil_moisture', 0):.1f}%
@@ -1280,6 +1281,97 @@ def api_health():
         'server_started': server_started
     })
 
+# ==================== 用户认证 API ====================
+
+@app.route('/api/auth/register', methods=['POST'])
+def api_auth_register():
+    """用户注册"""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'success': False, 'error': '请提供注册信息'}), 400
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    email = (data.get('email') or '').strip()
+    if len(username) < 3:
+        return jsonify({'success': False, 'error': '用户名至少3位'}), 400
+    if len(password) < 6:
+        return jsonify({'success': False, 'error': '密码至少6位'}), 400
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'success': False, 'error': '数据库连接失败'}), 500
+    try:
+        c = conn.cursor()
+        c.execute("SELECT id FROM users WHERE username = %s", (username,))
+        if c.fetchone():
+            c.close(); conn.close()
+            return jsonify({'success': False, 'error': '用户名已存在'}), 409
+        pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+        c.execute("INSERT INTO users (username, password, email) VALUES (%s, %s, %s)",
+                  (username, pwd_hash, email))
+        conn.commit()
+        c.close(); conn.close()
+        return jsonify({'success': True, 'message': '注册成功'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_auth_login():
+    """用户登录"""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'success': False, 'error': '请提供登录信息'}), 400
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'success': False, 'error': '数据库连接失败'}), 500
+    try:
+        c = conn.cursor()
+        c.execute("SELECT id, password, email FROM users WHERE username = %s", (username,))
+        row = c.fetchone()
+        c.close(); conn.close()
+        if not row:
+            return jsonify({'success': False, 'error': '用户不存在'}), 401
+        pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+        if row[1] != pwd_hash:
+            return jsonify({'success': False, 'error': '密码错误'}), 401
+        return jsonify({
+            'success': True,
+            'message': '登录成功',
+            'user': {'username': username, 'email': row[2] or ''}
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/auth/forgot', methods=['POST'])
+def api_auth_forgot():
+    """找回密码（验证用户名+邮箱，重置为123456）"""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'success': False, 'error': '请提供信息'}), 400
+    username = (data.get('username') or '').strip()
+    email = (data.get('email') or '').strip()
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'success': False, 'error': '数据库连接失败'}), 500
+    try:
+        c = conn.cursor()
+        c.execute("SELECT id, email FROM users WHERE username = %s", (username,))
+        row = c.fetchone()
+        if not row:
+            c.close(); conn.close()
+            return jsonify({'success': False, 'error': '用户不存在'}), 404
+        if row[1] != email:
+            c.close(); conn.close()
+            return jsonify({'success': False, 'error': '邮箱不匹配'}), 400
+        new_hash = hashlib.sha256(b'123456').hexdigest()
+        c.execute("UPDATE users SET password = %s WHERE id = %s", (new_hash, row[0]))
+        conn.commit()
+        c.close(); conn.close()
+        return jsonify({'success': True, 'message': '密码已重置为 123456'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # ==================== 阈值设置 API ====================
 
 @app.route('/api/threshold/set', methods=['POST'])
@@ -2160,6 +2252,17 @@ def init_app():
                     print(f"✅ 已添加缺失的列: {col}")
                 except Exception:
                     pass  # 列已存在，忽略
+            # 创建用户表
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    username VARCHAR(50) NOT NULL UNIQUE,
+                    password VARCHAR(64) NOT NULL,
+                    email VARCHAR(100) DEFAULT '',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            test_conn.commit()
             c.close()
         except Exception:
             pass

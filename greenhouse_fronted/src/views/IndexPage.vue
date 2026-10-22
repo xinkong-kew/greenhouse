@@ -391,7 +391,7 @@ const agent = reactive({
 
 // ===== AI 聊天 =====
 const chatMessages = ref([
-  { role: 'ai', text: '您好！我是智能温室助手，有什么可以帮您的？', time: '' }
+  { role: 'ai', text: '您好！我是绿耕智控助手，有什么可以帮您的？', time: '' }
 ])
 const chatInput = ref('')
 const chatLoading = ref(false)

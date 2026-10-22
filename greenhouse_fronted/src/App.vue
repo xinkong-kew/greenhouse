@@ -1,11 +1,11 @@
 <template>
   <div id="app-container" :class="{ 'mobile-mode': isMobile }">
-    <!-- PC 导航栏 -->
-    <nav class="navbar" v-if="!isMobile">
+    <!-- PC 导航栏（登录页隐藏） -->
+    <nav class="navbar" v-if="!isMobile && !isLoginPage">
       <div class="nav-inner">
         <router-link to="/" class="logo">
           <span class="logo-glow">🌿</span>
-          <span class="logo-text">智能温室监控系统</span>
+          <span class="logo-text">绿耕智控—大棚环境感知与远程调控系统</span>
         </router-link>
         <div class="nav-links">
           <router-link to="/" class="nav-link" active-class="active">
@@ -24,12 +24,12 @@
       </div>
     </nav>
 
-    <!-- 手机模式顶部栏 -->
-    <nav class="navbar mobile-navbar" v-if="isMobile">
+    <!-- 手机模式顶部栏（登录页隐藏） -->
+    <nav class="navbar mobile-navbar" v-if="isMobile && !isLoginPage">
       <div class="nav-inner">
         <router-link to="/" class="logo">
           <span class="logo-glow">🌿</span>
-          <span class="logo-text">智能温室</span>
+          <span class="logo-text">绿耕智控</span>
         </router-link>
         <button class="view-toggle active" @click="toggleMobile" title="返回电脑模式">
           💻
@@ -47,8 +47,8 @@
       </div>
     </main>
 
-    <!-- 手机模式底部导航栏 -->
-    <nav class="mobile-bottom-nav" v-if="isMobile">
+    <!-- 手机模式底部导航栏（登录页隐藏） -->
+    <nav class="mobile-bottom-nav" v-if="isMobile && !isLoginPage">
       <router-link to="/" class="mb-nav-link" active-class="active">
         <span class="mb-icon">🏠</span>
         <span class="mb-label">首页</span>
@@ -66,9 +66,14 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useRoute } from 'vue-router'
 
+const route = useRoute()
 const isMobile = ref(false)
+
+// 登录页面隐藏导航栏（登录页是全屏独立页面）
+const isLoginPage = computed(() => route.name === 'Login')
 
 function toggleMobile() {
   isMobile.value = !isMobile.value
@@ -88,6 +93,11 @@ body {
   color: #c8d6e5;
   line-height: 1.5;
   height: 100vh;
+  overflow: hidden;
+}
+
+html {
+  overflow: hidden;
 }
 
 /* 背景科技网格 */
